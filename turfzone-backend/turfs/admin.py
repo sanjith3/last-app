@@ -49,12 +49,18 @@ class TurfAdmin(admin.ModelAdmin):
     actions = ['approve_turfs', 'reject_turfs']
     
     def approve_turfs(self, request, queryset):
-        count = queryset.update(status='approved')
+        count = 0
+        for turf in queryset:
+            turf.approve()
+            count += 1
         self.message_user(request, f'{count} turfs were approved.')
     approve_turfs.short_description = 'Approve selected turfs'
     
     def reject_turfs(self, request, queryset):
-        count = queryset.update(status='rejected')
+        count = 0
+        for turf in queryset:
+            turf.reject()
+            count += 1
         self.message_user(request, f'{count} turfs were rejected.')
     reject_turfs.short_description = 'Reject selected turfs'
 

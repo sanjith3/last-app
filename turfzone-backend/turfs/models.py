@@ -51,7 +51,7 @@ class Turf(models.Model):
     
     # Basic Information
     name = models.CharField(max_length=200)
-    description = models.TextField()
+    description = models.TextField(blank=True, null=True)
     address = models.TextField()
     city = models.CharField(max_length=100)
     state = models.CharField(max_length=100)
@@ -67,6 +67,7 @@ class Turf(models.Model):
     
     # Status
     status = models.CharField(max_length=20, choices=TurfStatus.choices, default=TurfStatus.PENDING)
+    rejection_reason = models.TextField(blank=True, null=True)
     
     # Relationships
     sports = models.ManyToManyField(Sport, related_name='turfs')
@@ -80,7 +81,7 @@ class Turf(models.Model):
     review_count = models.IntegerField(default=0)
     
     # Metadata
-    is_active = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=False)
     google_maps_share_link = models.URLField(blank=True, null=True)
     
     created_at = models.DateTimeField(auto_now_add=True)
@@ -93,12 +94,25 @@ class Turf(models.Model):
     def approve(self):
         """Approve this turf listing."""
         self.status = TurfStatus.APPROVED
+        self.is_active = True
         self.approved_at = timezone.now()
+        self.rejection_reason = None
         self.save()
+        
+        # Verify the owner and upgrade role when their first turf is approved
+        if self.owner.role == 'user':
+            self.owner.role = 'turf_owner'
+            self.owner.is_verified = True
+            self.owner.save()
+        elif not self.owner.is_verified:
+            self.owner.is_verified = True
+            self.owner.save()
     
-    def reject(self):
+    def reject(self, reason=None):
         """Reject this turf listing."""
         self.status = TurfStatus.REJECTED
+        if reason:
+            self.rejection_reason = reason
         self.save()
     
     class Meta:

@@ -37,6 +37,8 @@ class TurfOwner(models.Model):
     user = models.OneToOneField(CustomUser, on_delete=models.CASCADE, related_name='turf_owner_profile')
     bank_account = models.CharField(max_length=50, blank=True, null=True)
     ifsc_code = models.CharField(max_length=11, blank=True, null=True)
+    bank_name = models.CharField(max_length=100, blank=True, null=True)
+    account_holder_name = models.CharField(max_length=100, blank=True, null=True)
     gst_number = models.CharField(max_length=15, blank=True, null=True)
     total_turfs = models.IntegerField(default=0)
     total_bookings = models.IntegerField(default=0)

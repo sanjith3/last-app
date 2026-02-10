@@ -45,15 +45,29 @@ class TurfViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """Filter turfs based on user role and status."""
-        if self.request.user.role == 'turf_owner':
-            # Turf owners see only their own turfs
-            return Turf.objects.filter(owner=self.request.user).select_related('owner').prefetch_related('sports', 'amenities', 'images')
-        elif self.request.user.role == 'admin':
+        user = self.request.user
+        
+        # Base queryset with necessary relations
+        queryset = Turf.objects.select_related('owner').prefetch_related(
+            'sports', 'amenities', 'images'
+        ).distinct()
+        
+        if not user or user.is_anonymous:
+            # Anonymous users see only approved and active turfs
+            return queryset.filter(status=TurfStatus.APPROVED, is_active=True)
+            
+        if user.role == 'admin':
             # Admins see all turfs
-            return Turf.objects.all().select_related('owner').prefetch_related('sports', 'amenities', 'images')
-        else:
-            # Normal users see only approved turfs
-            return Turf.objects.filter(status=TurfStatus.APPROVED, is_active=True).select_related('owner').prefetch_related('sports', 'amenities', 'images')
+            return queryset
+            
+        # Turf owners and normal users see:
+        # 1. Any approved & active turf (for public browsing)
+        # 2. ALSO any turf they own personally (for their dashboard)
+        from django.db.models import Q
+        return queryset.filter(
+            Q(status=TurfStatus.APPROVED, is_active=True) |
+            Q(owner=user)
+        )
     
     def get_serializer_class(self):
         if self.action == 'create' or self.action == 'update' or self.action == 'partial_update':
@@ -85,6 +99,11 @@ class TurfViewSet(viewsets.ModelViewSet):
         if city:
             queryset = queryset.filter(city__icontains=city)
         
+        # My turfs filter (Dashboard mode)
+        my_turfs = request.query_params.get('my_turfs', 'false').lower() == 'true'
+        if my_turfs and request.user.is_authenticated:
+            queryset = queryset.filter(owner=request.user)
+        
         # Price filter
         min_price = request.query_params.get('min_price')
         max_price = request.query_params.get('max_price')
@@ -106,10 +125,9 @@ class TurfViewSet(viewsets.ModelViewSet):
                 
                 for turf in queryset:
                     distance = calculate_distance_haversine(user_lat, user_lon, turf.latitude, turf.longitude)
-                    if distance <= radius:
-                        # Add distance to turf for serialization
-                        turf.distance = distance
-                        turfs_data.append(turf)
+                    # Add distance to turf for serialization
+                    turf.distance = distance
+                    turfs_data.append(turf)
                 
                 # Sort by distance
                 turfs_data.sort(key=lambda t: t.distance)
@@ -225,7 +243,8 @@ class TurfViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_403_FORBIDDEN)
         
         turf = self.get_object()
-        turf.reject()
+        reason = request.data.get('reason', 'Application rejected by platform admin')
+        turf.reject(reason=reason)
         
         return Response({
             'success': True,
@@ -268,7 +287,12 @@ class TurfViewSet(viewsets.ModelViewSet):
                 'error': 'No image provided'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        is_cover = request.data.get('is_cover', False)
+        is_cover_raw = request.data.get('is_cover', False)
+        # Handle string "true"/"false" from multipart/form-data
+        if isinstance(is_cover_raw, str):
+            is_cover = is_cover_raw.lower() == 'true'
+        else:
+            is_cover = bool(is_cover_raw)
         
         # If marking as cover, unmark previous cover
         if is_cover:

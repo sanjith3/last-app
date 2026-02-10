@@ -1,0 +1,9 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+db.sqlite3
+
+# Flutter
+.build/
+.dart_tool/

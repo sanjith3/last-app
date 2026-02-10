@@ -21,7 +21,7 @@ from .serializers import (
 )
 from .models import TurfOwner
 from core.utils import extract_coordinates_from_google_maps_share_link
-from turfs.models import Turf, TurfStatus
+from turfs.models import Turf, TurfStatus, Sport, Amenity
 
 User = get_user_model()
 
@@ -72,7 +72,7 @@ class UserRegistrationViewSet(viewsets.ViewSet):
                     turf = Turf.objects.create(
                         owner=user,
                         name=request.data.get('turf_name', 'New Turf'),
-                        description='Pending description',
+                        description=request.data.get('description', ''),
                         address=request.data.get('address', ''),
                         city=request.data.get('city', ''),
                         state=request.data.get('state', ''),
@@ -80,6 +80,7 @@ class UserRegistrationViewSet(viewsets.ViewSet):
                         longitude=coords['longitude'],
                         price_per_hour=request.data.get('price_per_hour', 500),
                         status=TurfStatus.PENDING,
+                        is_active=False,
                         google_maps_share_link=google_maps_link,
                     )
                     
@@ -117,6 +118,7 @@ class UserRegistrationViewSet(viewsets.ViewSet):
 class UserLoginViewSet(viewsets.ViewSet):
     """ViewSet for user login."""
     permission_classes = [AllowAny]
+    authentication_classes = []
     
     @action(detail=False, methods=['post'])
     def login(self, request):
@@ -124,32 +126,50 @@ class UserLoginViewSet(viewsets.ViewSet):
         Login user with username and password.
         Link: POST /api/users/user-login/login/
         """
+        print(f"DEBUG: Login attempt for: {request.data.get('username')}")
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
             try:
-                user = User.objects.get(username=serializer.validated_data['username'])
-                if user.check_password(serializer.validated_data['password']):
-                    refresh = RefreshToken.for_user(user)
-                    return Response({
-                        'success': True,
-                        'message': 'Login successful',
-                        'user': CustomUserDetailSerializer(user).data,
-                        'tokens': {
-                            'refresh': str(refresh),
-                            'access': str(refresh.access_token),
-                        }
-                    }, status=status.HTTP_200_OK)
+                username_or_phone = serializer.validated_data['username']
+                # Try by username
+                user = User.objects.filter(username=username_or_phone).first()
+                if not user:
+                    # Try by phone_number
+                    user = User.objects.filter(phone_number=username_or_phone).first()
+                if not user:
+                    # Try by email
+                    user = User.objects.filter(email=username_or_phone).first()
+
+                if user:
+                    if user.check_password(serializer.validated_data['password']):
+                        refresh = RefreshToken.for_user(user)
+                        print(f"DEBUG: Login successful for: {user.username}")
+                        return Response({
+                            'success': True,
+                            'message': 'Login successful',
+                            'user': CustomUserDetailSerializer(user).data,
+                            'tokens': {
+                                'refresh': str(refresh),
+                                'access': str(refresh.access_token),
+                            }
+                        }, status=status.HTTP_200_OK)
+                    else:
+                        print(f"DEBUG: Password check failed for: {user.username}")
                 else:
-                    return Response({
-                        'success': False,
-                        'error': 'Invalid credentials'
-                    }, status=status.HTTP_401_UNAUTHORIZED)
-            except User.DoesNotExist:
+                    print(f"DEBUG: User not found: {username_or_phone}")
+
                 return Response({
                     'success': False,
                     'error': 'Invalid credentials'
                 }, status=status.HTTP_401_UNAUTHORIZED)
+            except Exception as e:
+                print(f"DEBUG: Login error: {str(e)}")
+                return Response({
+                    'success': False,
+                    'error': 'An error occurred during login'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
+        print(f"DEBUG: Serializer invalid: {serializer.errors}")
         return Response({
             'success': False,
             'errors': serializer.errors
@@ -203,6 +223,80 @@ class UserProfileViewSet(viewsets.ViewSet):
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
     
+    @action(detail=False, methods=['post'])
+    def become_partner(self, request):
+        """
+        Upgrade current user to turf owner and register their first turf.
+        Link: POST /api/users/user-profile/become_partner/
+        """
+        user = request.user
+        data = request.data
+        
+        try:
+            with transaction.atomic():
+                # 1. Get or create TurfOwner profile
+                turf_owner, created = TurfOwner.objects.get_or_create(user=user)
+                if data.get('bank_account'):
+                    turf_owner.bank_account = data.get('bank_account')
+                if data.get('ifsc_code'):
+                    turf_owner.ifsc_code = data.get('ifsc_code')
+                if data.get('bank_name'):
+                    turf_owner.bank_name = data.get('bank_name')
+                if data.get('account_holder_name'):
+                    turf_owner.account_holder_name = data.get('account_holder_name')
+                turf_owner.save()
+                
+                # 3. Extract coordinates from Google Maps link
+                google_maps_link = data.get('google_maps_share_link')
+                if not google_maps_link:
+                    return Response({'success': False, 'error': 'Google Maps share link is required'}, status=status.HTTP_400_BAD_REQUEST)
+                
+                coords = extract_coordinates_from_google_maps_share_link(google_maps_link)
+                if not coords['success']:
+                    return Response({'success': False, 'error': coords['message']}, status=status.HTTP_400_BAD_REQUEST)
+                
+                # 4. Create the Turf in PENDING status
+                turf = Turf.objects.create(
+                    owner=user,
+                    name=data.get('turf_name', 'New Turf'),
+                    description=data.get('description', ''),
+                    address=data.get('address', ''),
+                    city=data.get('city', ''),
+                    state=data.get('state', ''),
+                    postal_code=data.get('postal_code', ''),
+                    latitude=coords['latitude'],
+                    longitude=coords['longitude'],
+                    price_per_hour=data.get('price_per_hour', 500),
+                    status=TurfStatus.PENDING,
+                    is_active=False,
+                    google_maps_share_link=google_maps_link,
+                )
+                
+                # 5. Add Sports
+                sports_list = data.get('sports', [])
+                for sport_name in sports_list:
+                    sport, _ = Sport.objects.get_or_create(name=sport_name)
+                    turf.sports.add(sport)
+                
+                # 6. Add Amenities
+                amenities_list = data.get('amenities', [])
+                for amenity_name in amenities_list:
+                    amenity, _ = Amenity.objects.get_or_create(name=amenity_name)
+                    turf.amenities.add(amenity)
+                
+                return Response({
+                    'success': True,
+                    'message': 'Successfully applied to become a partner. Your turf is pending approval.',
+                    'turf_id': turf.id,
+                    'user': CustomUserDetailSerializer(user).data
+                }, status=status.HTTP_201_CREATED)
+                
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+
     @action(detail=False, methods=['post'])
     def change_password(self, request):
         """

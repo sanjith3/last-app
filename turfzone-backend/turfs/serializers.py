@@ -46,7 +46,8 @@ class TurfListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'city', 'price_per_hour', 'rating', 'review_count',
             'address', 'latitude', 'longitude', 'sports', 'amenities',
-            'images', 'cover_image', 'distance', 'review_count'
+            'images', 'cover_image', 'distance', 'status', 'rejection_reason',
+            'google_maps_share_link'
         ]
     
     def get_cover_image(self, obj):
@@ -73,7 +74,7 @@ class TurfDetailSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'owner', 'name', 'description', 'address', 'city', 'state',
             'postal_code', 'latitude', 'longitude', 'price_per_hour', 'max_players',
-            'status', 'rating', 'review_count', 'sports', 'amenities', 'images',
+            'status', 'rejection_reason', 'rating', 'review_count', 'sports', 'amenities', 'images',
             'reviews', 'is_active', 'google_maps_share_link', 'distance',
             'created_at', 'updated_at', 'approved_at'
         ]
@@ -129,6 +130,10 @@ class TurfCreateUpdateSerializer(serializers.ModelSerializer):
         
         # Set owner from request
         validated_data['owner'] = self.context['request'].user
+        
+        # Explicitly set status to pending and is_active to False for new registrations
+        validated_data['status'] = 'pending'
+        validated_data['is_active'] = False
         
         turf = Turf.objects.create(**validated_data)
         
