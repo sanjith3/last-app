@@ -40,8 +40,14 @@ class AmenityViewSet(viewsets.ReadOnlyModelViewSet):
 
 class TurfViewSet(viewsets.ModelViewSet):
     """ViewSet for turfs."""
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]  # Default — overridden below for public actions
     lookup_field = 'pk'
+
+    def get_permissions(self):
+        """Public read, protected write."""
+        if self.action in ['list', 'retrieve', 'reviews']:
+            return [AllowAny()]
+        return [IsAuthenticated()]
     
     def get_queryset(self):
         """Filter turfs based on user role and status."""
@@ -127,7 +133,9 @@ class TurfViewSet(viewsets.ModelViewSet):
                     distance = calculate_distance_haversine(user_lat, user_lon, turf.latitude, turf.longitude)
                     # Add distance to turf for serialization
                     turf.distance = distance
-                    turfs_data.append(turf)
+                    # Only include turfs within the radius
+                    if distance <= radius:
+                        turfs_data.append(turf)
                 
                 # Sort by distance
                 turfs_data.sort(key=lambda t: t.distance)

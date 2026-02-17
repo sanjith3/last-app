@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Turf, TurfImage, Sport, Amenity, Review
+from .models import Turf, TurfImage, Sport, Amenity, Review, SlotMaster, SlotOffer, BlockedSlot
 
 
 @admin.register(Sport)
@@ -78,3 +78,40 @@ class ReviewAdmin(admin.ModelAdmin):
     list_filter = ['rating', 'created_at']
     search_fields = ['turf__name', 'user__username']
     readonly_fields = ['created_at', 'updated_at']
+
+
+# ---------------------------------------------------------------------------
+# Slot & Offer Admin
+# ---------------------------------------------------------------------------
+
+class SlotOfferInline(admin.TabularInline):
+    model = SlotOffer
+    extra = 0
+    fields = ['offer_type', 'value', 'max_discount_cap', 'valid_from', 'valid_until', 'is_active']
+
+
+@admin.register(SlotMaster)
+class SlotMasterAdmin(admin.ModelAdmin):
+    list_display = ['turf', 'get_day_display', 'start_time', 'end_time', 'base_price', 'is_active']
+    list_filter = ['turf', 'day_of_week', 'is_active']
+    search_fields = ['turf__name']
+    inlines = [SlotOfferInline]
+
+    def get_day_display(self, obj):
+        return obj.get_day_of_week_display()
+    get_day_display.short_description = 'Day'
+
+
+@admin.register(SlotOffer)
+class SlotOfferAdmin(admin.ModelAdmin):
+    list_display = ['slot_master', 'offer_type', 'value', 'max_discount_cap', 'valid_from', 'valid_until', 'is_active']
+    list_filter = ['offer_type', 'is_active', 'valid_from']
+    search_fields = ['slot_master__turf__name']
+
+
+@admin.register(BlockedSlot)
+class BlockedSlotAdmin(admin.ModelAdmin):
+    list_display = ['turf', 'slot_master', 'date', 'reason']
+    list_filter = ['date', 'turf']
+    search_fields = ['turf__name', 'reason']
+

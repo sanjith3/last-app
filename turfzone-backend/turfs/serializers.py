@@ -3,9 +3,11 @@ Serializers for turfs app.
 """
 
 from rest_framework import serializers
-from .models import Turf, TurfImage, Sport, Amenity, Review
+from .models import Turf, TurfImage, Sport, Amenity, Review, SlotOffer, OfferType
 from users.serializers import CustomUserBasicSerializer
 from core.utils import extract_coordinates_from_google_maps_share_link
+from datetime import date
+from decimal import Decimal, ROUND_HALF_UP
 
 
 class SportSerializer(serializers.ModelSerializer):
@@ -40,6 +42,9 @@ class TurfListSerializer(serializers.ModelSerializer):
     images = TurfImageSerializer(many=True, read_only=True)
     cover_image = serializers.SerializerMethodField()
     distance = serializers.FloatField(read_only=True, required=False)
+    has_active_offer = serializers.SerializerMethodField()
+    max_offer_type = serializers.SerializerMethodField()
+    max_offer_value = serializers.SerializerMethodField()
     
     class Meta:
         model = Turf
@@ -47,7 +52,8 @@ class TurfListSerializer(serializers.ModelSerializer):
             'id', 'name', 'city', 'price_per_hour', 'rating', 'review_count',
             'address', 'latitude', 'longitude', 'sports', 'amenities',
             'images', 'cover_image', 'distance', 'status', 'rejection_reason',
-            'google_maps_share_link'
+            'google_maps_share_link',
+            'has_active_offer', 'max_offer_type', 'max_offer_value',
         ]
     
     def get_cover_image(self, obj):
@@ -59,13 +65,44 @@ class TurfListSerializer(serializers.ModelSerializer):
             return obj.images.first().image.url
         return None
 
+    def _get_best_offer(self, turf):
+        """Find the active SlotOffer that yields the maximum absolute discount."""
+        today = date.today()
+        offers = SlotOffer.objects.filter(
+            slot_master__turf=turf,
+            is_active=True,
+            valid_from__lte=today,
+            valid_until__gte=today,
+        ).select_related('slot_master')
 
-class TurfDetailSerializer(serializers.ModelSerializer):
-    """Detailed turf serializer."""
+        best_offer = None
+        best_discount = Decimal('0.00')
+
+        for offer in offers:
+            discount = offer.calculate_discount(offer.slot_master.base_price)
+            if discount > best_discount:
+                best_discount = discount
+                best_offer = offer
+
+        return best_offer
+
+    def get_has_active_offer(self, turf):
+        return self._get_best_offer(turf) is not None
+
+    def get_max_offer_type(self, turf):
+        offer = self._get_best_offer(turf)
+        return offer.offer_type if offer else None
+
+    def get_max_offer_value(self, turf):
+        offer = self._get_best_offer(turf)
+        if offer is None:
+            return None
+        return str(offer.value)
+
+
+class TurfDetailSerializer(TurfListSerializer):
+    """Detailed turf serializer — extends TurfListSerializer with additional fields."""
     owner = CustomUserBasicSerializer(read_only=True)
-    sports = SportSerializer(many=True, read_only=True)
-    amenities = AmenitySerializer(many=True, read_only=True)
-    images = TurfImageSerializer(many=True, read_only=True)
     reviews = serializers.SerializerMethodField()
     distance = serializers.FloatField(read_only=True, required=False)
     
@@ -76,6 +113,7 @@ class TurfDetailSerializer(serializers.ModelSerializer):
             'postal_code', 'latitude', 'longitude', 'price_per_hour', 'max_players',
             'status', 'rejection_reason', 'rating', 'review_count', 'sports', 'amenities', 'images',
             'reviews', 'is_active', 'google_maps_share_link', 'distance',
+            'has_active_offer', 'max_offer_type', 'max_offer_value',
             'created_at', 'updated_at', 'approved_at'
         ]
         read_only_fields = ['id', 'owner', 'status', 'created_at', 'updated_at', 'approved_at']

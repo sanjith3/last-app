@@ -2,12 +2,15 @@
 Serializers for bookings app.
 """
 
+from decimal import Decimal, ROUND_HALF_UP
+from datetime import datetime, time
+
 from rest_framework import serializers
-from .models import Booking, Payment, BookingStatus, PaymentStatus
+from django.utils import timezone
+
+from .models import Booking, BookingPreview, Payment, BookingStatus, PaymentStatus
 from turfs.serializers import TurfListSerializer
 from users.serializers import CustomUserBasicSerializer
-from django.utils import timezone
-from datetime import datetime, time
 
 
 class PaymentSerializer(serializers.ModelSerializer):
@@ -43,9 +46,13 @@ class BookingDetailSerializer(serializers.ModelSerializer):
         model = Booking
         fields = [
             'id', 'user', 'turf', 'booking_date', 'start_time', 'end_time',
+            'selected_slots',
             'price_per_hour', 'total_price', 'discount', 'final_price',
+            'gst_amount', 'commission', 'platform_fee', 'gst_on_platform_fee',
+            'owner_payout', 'payout_status',
             'booking_status', 'payment_status', 'notes', 'payment',
             'cancelled_reason', 'cancelled_at', 'cancelled_by_admin',
+            'idempotency_key',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'user', 'created_at', 'updated_at']
@@ -87,26 +94,34 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         return data
     
     def create(self, validated_data):
-        """Create booking with calculated prices."""
+        """Create booking with calculated prices using Decimal."""
         from turfs.models import Turf
         
         turf_id = validated_data.pop('turf_id')
         turf = Turf.objects.get(id=turf_id)
         
-        # Calculate duration
+        # Calculate duration using Decimal — no float()
         start_time = validated_data['start_time']
         end_time = validated_data['end_time']
         start_dt = datetime.combine(validated_data['booking_date'], start_time)
         end_dt = datetime.combine(validated_data['booking_date'], end_time)
-        duration_hours = (end_dt - start_dt).total_seconds() / 3600
+        duration_seconds = Decimal(str((end_dt - start_dt).total_seconds()))
+        duration_hours = (duration_seconds / Decimal('3600')).quantize(
+            Decimal('0.01'), rounding=ROUND_HALF_UP
+        )
         
-        # Calculate prices
+        # Calculate prices with Decimal
+        price_per_hour = Decimal(str(turf.price_per_hour))
+        total_price = (price_per_hour * duration_hours).quantize(
+            Decimal('0.01'), rounding=ROUND_HALF_UP
+        )
+        
         validated_data['turf'] = turf
         validated_data['user'] = self.context['request'].user
-        validated_data['price_per_hour'] = turf.price_per_hour
-        validated_data['total_price'] = turf.price_per_hour * duration_hours
-        validated_data['discount'] = 0  # Can be set later
-        validated_data['final_price'] = validated_data['total_price']
+        validated_data['price_per_hour'] = price_per_hour
+        validated_data['total_price'] = total_price
+        validated_data['discount'] = Decimal('0.00')
+        validated_data['final_price'] = total_price
         validated_data['booking_status'] = BookingStatus.PENDING
         validated_data['payment_status'] = PaymentStatus.PENDING
         

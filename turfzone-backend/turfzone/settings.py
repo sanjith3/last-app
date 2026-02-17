@@ -32,9 +32,11 @@ INSTALLED_APPS = [
     'users',
     'turfs',
     'bookings',
+    'finance',
 ]
 
 MIDDLEWARE = [
+    'core.middleware.RequestDebugMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
@@ -65,11 +67,34 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'turfzone.wsgi.application'
 
-# Database
-DATABASES = {
+# Database — PostgreSQL for production, SQLite fallback for quick dev
+_DB_ENGINE = os.environ.get('DB_ENGINE', 'sqlite3')
+
+if _DB_ENGINE == 'postgresql':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.environ.get('DB_NAME', 'turfzone'),
+            'USER': os.environ.get('DB_USER', 'postgres'),
+            'PASSWORD': os.environ.get('DB_PASSWORD', 'postgres'),
+            'HOST': os.environ.get('DB_HOST', 'localhost'),
+            'PORT': os.environ.get('DB_PORT', '5432'),
+        }
+    }
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
+
+# Cache — Redis for production locking & caching
+_REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/1')
+CACHES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION': _REDIS_URL,
     }
 }
 
@@ -91,7 +116,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 # Internationalization
 LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Kolkata'
 USE_I18N = True
 USE_TZ = True
 
@@ -124,22 +149,13 @@ SIMPLE_JWT = {
     'SIGNING_KEY': SECRET_KEY,
 }
 
-# CORS Configuration
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://10.0.2.2:8000",  # Android emulator localhost
-    "http://10.0.2.2:3000",  # Android emulator Flutter
-]
-
+CORS_ALLOW_ALL_ORIGINS = True  # Dev only — restrict in production
 CORS_ALLOW_CREDENTIALS = True
 
 # Custom User Model
 AUTH_USER_MODEL = 'users.CustomUser'
 
-# Logging
+# Logging — force every request to console
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -148,8 +164,16 @@ LOGGING = {
             'class': 'logging.StreamHandler',
         },
     },
-    'root': {
-        'handlers': ['console'],
-        'level': 'INFO',
+    'loggers': {
+        'django.server': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
     },
 }

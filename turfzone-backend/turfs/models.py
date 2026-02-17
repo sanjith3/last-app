@@ -156,3 +156,119 @@ class Review(models.Model):
     class Meta:
         ordering = ['-created_at']
         unique_together = ['turf', 'user']  # One review per user per turf
+
+
+# ---------------------------------------------------------------------------
+# Slot & Offer models — per-slot precision
+# ---------------------------------------------------------------------------
+
+class DayOfWeek(models.IntegerChoices):
+    MONDAY = 0, 'Monday'
+    TUESDAY = 1, 'Tuesday'
+    WEDNESDAY = 2, 'Wednesday'
+    THURSDAY = 3, 'Thursday'
+    FRIDAY = 4, 'Friday'
+    SATURDAY = 5, 'Saturday'
+    SUNDAY = 6, 'Sunday'
+
+
+class SlotMaster(models.Model):
+    """
+    Defines one recurring time slot for a turf on a specific day of the week.
+    Example: Turf #1, Monday, 06:00–07:00, ₹500.
+    """
+    turf = models.ForeignKey(Turf, on_delete=models.CASCADE, related_name='slot_masters')
+    day_of_week = models.IntegerField(choices=DayOfWeek.choices)
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    base_price = models.DecimalField(max_digits=10, decimal_places=2)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['turf', 'day_of_week', 'start_time']
+        unique_together = ['turf', 'day_of_week', 'start_time', 'end_time']
+        indexes = [
+            models.Index(fields=['turf', 'day_of_week', 'is_active']),
+        ]
+
+    def __str__(self):
+        return f"{self.turf.name} | {self.get_day_of_week_display()} {self.start_time}–{self.end_time} | ₹{self.base_price}"
+
+
+class OfferType(models.TextChoices):
+    PERCENTAGE = 'percentage', 'Percentage'
+    FLAT = 'flat', 'Flat Amount'
+
+
+class SlotOffer(models.Model):
+    """
+    Per-slot offer/discount. Tied to a specific SlotMaster.
+    Supports percentage (with optional cap) and flat discounts.
+    """
+    slot_master = models.ForeignKey(SlotMaster, on_delete=models.CASCADE, related_name='offers')
+    offer_type = models.CharField(max_length=10, choices=OfferType.choices)
+    value = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        help_text='Percentage (e.g. 20.00 for 20%) or flat amount (e.g. 100.00 for ₹100 off)',
+    )
+    max_discount_cap = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        null=True, blank=True,
+        help_text='Maximum discount ceiling for percentage offers. Ignored for flat offers.',
+    )
+    valid_from = models.DateField()
+    valid_until = models.DateField()
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['slot_master', 'is_active', 'valid_from', 'valid_until']),
+        ]
+
+    def __str__(self):
+        if self.offer_type == OfferType.PERCENTAGE:
+            cap = f" (cap ₹{self.max_discount_cap})" if self.max_discount_cap else ""
+            return f"{self.value}% off{cap} on {self.slot_master}"
+        return f"₹{self.value} off on {self.slot_master}"
+
+    def calculate_discount(self, base_price):
+        """
+        Calculate the absolute discount amount for a given base_price.
+        Uses Decimal — never float.
+        """
+        from decimal import Decimal, ROUND_HALF_UP
+        base = Decimal(str(base_price))
+
+        if self.offer_type == OfferType.PERCENTAGE:
+            discount = (base * self.value / Decimal('100')).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP
+            )
+            if self.max_discount_cap is not None:
+                discount = min(discount, self.max_discount_cap)
+        else:
+            discount = min(self.value, base)  # Flat discount cannot exceed base price
+
+        return discount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
+class BlockedSlot(models.Model):
+    """
+    Admin can block a specific slot on a specific date.
+    E.g. maintenance, private booking, weather.
+    """
+    turf = models.ForeignKey(Turf, on_delete=models.CASCADE, related_name='blocked_slots')
+    slot_master = models.ForeignKey(SlotMaster, on_delete=models.CASCADE, related_name='blocks')
+    date = models.DateField()
+    reason = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ['slot_master', 'date']
+        ordering = ['date', 'slot_master__start_time']
+
+    def __str__(self):
+        return f"BLOCKED: {self.slot_master} on {self.date} — {self.reason}"

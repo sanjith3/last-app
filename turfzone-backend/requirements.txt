@@ -12,3 +12,4 @@ celery==5.3.4
 redis==5.0.1
 beautifulsoup4==4.12.2
 geopy==2.4.1
+django-redis==5.4.0
