@@ -41,15 +41,20 @@ class CustomUserRegistrationSerializer(serializers.ModelSerializer):
 
 class CustomUserDetailSerializer(serializers.ModelSerializer):
     """Detailed user info."""
+    available_credits = serializers.SerializerMethodField()
     
     class Meta:
         model = User
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name',
             'phone_number', 'role', 'profile_picture', 'bio', 'is_verified',
+            'total_bookings', 'total_credits', 'used_credits', 'available_credits',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def get_available_credits(self, obj):
+        return obj.available_credits
 
 
 class TurfOwnerProfileSerializer(serializers.ModelSerializer):

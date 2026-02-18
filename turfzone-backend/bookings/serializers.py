@@ -32,6 +32,7 @@ class BookingListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'user', 'turf', 'booking_date', 'start_time', 'end_time',
             'total_price', 'final_price', 'booking_status', 'payment_status',
+            'is_redeemed', 'credits_used',
             'created_at'
         ]
 
@@ -51,6 +52,7 @@ class BookingDetailSerializer(serializers.ModelSerializer):
             'gst_amount', 'commission', 'platform_fee', 'gst_on_platform_fee',
             'owner_payout', 'payout_status',
             'booking_status', 'payment_status', 'notes', 'payment',
+            'is_redeemed', 'credits_used',
             'cancelled_reason', 'cancelled_at', 'cancelled_by_admin',
             'idempotency_key',
             'created_at', 'updated_at'

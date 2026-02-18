@@ -128,6 +128,10 @@ class Booking(models.Model):
         default=PayoutStatus.PENDING,
     )
 
+    # Credit redemption — tracks free bookings
+    is_redeemed = models.BooleanField(default=False)
+    credits_used = models.PositiveIntegerField(default=0)
+
     # Idempotency key — prevents duplicate bookings from retries
     idempotency_key = models.UUIDField(unique=True, null=True, blank=True)
 

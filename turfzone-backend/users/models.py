@@ -21,8 +21,19 @@ class CustomUser(AbstractUser):
     profile_picture = models.ImageField(upload_to='profile_pictures/', blank=True, null=True)
     bio = models.TextField(blank=True, null=True)
     is_verified = models.BooleanField(default=False)
+
+    # Credit system — server-side counters (never computed client-side)
+    total_bookings = models.PositiveIntegerField(default=0)
+    total_credits = models.PositiveIntegerField(default=0)
+    used_credits = models.PositiveIntegerField(default=0)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def available_credits(self):
+        """Derived — never stored in DB."""
+        return self.total_credits - self.used_credits
     
     def __str__(self):
         return f"{self.username} ({self.get_role_display()})"
