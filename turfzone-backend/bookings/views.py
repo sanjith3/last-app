@@ -51,6 +51,37 @@ def _quantize(value):
     return Decimal(str(value)).quantize(QUANTIZE_PLACES, rounding=ROUND_HALF_UP)
 
 
+def _is_slot_past(booking_date, slot_start_time, slot_end_time):
+    """
+    Timezone-aware past-slot check using full datetime comparison.
+
+    A slot is past once its START TIME has passed.
+    12:00:01 → slot 12:00-13:00 is DISABLED.
+
+    Returns True if the slot's start time has passed.
+    """
+    now = timezone.localtime()  # Timezone-aware, local time
+
+    # Construct timezone-aware datetime for slot start
+    slot_start_dt = timezone.make_aware(
+        datetime.combine(booking_date, slot_start_time),
+        timezone.get_current_timezone(),
+    )
+
+    result = now >= slot_start_dt
+
+    print("=== SLOT DEBUG ===")
+    print("NOW:", now)
+    print("BOOKING DATE:", booking_date)
+    print("START TIME:", slot_start_time)
+    print("SLOT DATETIME:", slot_start_dt)
+    print("COMPARISON RESULT:", result)
+    print("SERVER TIMEZONE:", timezone.get_current_timezone())
+    print("==================")
+
+    return result
+
+
 def _find_best_offer_for_slot(slot_master, booking_date):
     """
     Find the active SlotOffer that yields the maximum absolute discount
@@ -378,8 +409,16 @@ class BookingViewSet(viewsets.ModelViewSet):
         now = timezone.now()
         today = now.date()
 
+        # Debug: print selected date vs today
+        print("\n===== AVAILABILITY DEBUG =====")
+        print("SELECTED DATE:", booking_date)
+        print("TODAY:", timezone.localdate())
+        print("NOW:", timezone.localtime())
+        print("==============================\n")
+
         result_slots = []
         for slot in slots:
+            print("CALLING _is_slot_past FOR:", slot.start_time, "-", slot.end_time)
             try:
                 pricing = _compute_slot_pricing(slot, booking_date)
             except Exception as e:
@@ -396,12 +435,8 @@ class BookingViewSet(viewsets.ModelViewSet):
                     'offer_value': None,
                 }
 
-            # --- A. Past check (start_time, not end_time) ---
-            is_past = False
-            if booking_date < today:
-                is_past = True
-            elif booking_date == today:
-                is_past = slot.start_time <= now.time()
+            # --- A. Past check (timezone-aware, full datetime, end_time) ---
+            is_past = _is_slot_past(booking_date, slot.start_time, slot.end_time)
 
             # --- B. Blocked check ---
             is_blocked = slot.id in blocked_slot_ids
@@ -516,7 +551,7 @@ class BookingViewSet(viewsets.ModelViewSet):
                     'error': f'Slot {slot.start_time}-{slot.end_time} is already booked',
                 }, status=status.HTTP_409_CONFLICT)
 
-            if booking_date < today or (booking_date == today and slot.start_time <= now.time()):
+            if _is_slot_past(booking_date, slot.start_time, slot.end_time):
                 return Response({
                     'success': False,
                     'error': f'Slot {slot.start_time}-{slot.end_time} is in the past',
@@ -662,16 +697,11 @@ class BookingViewSet(viewsets.ModelViewSet):
                 )
 
                 for slot in slots:
-                    # Past check (start_time)
-                    if preview.booking_date < today:
+                    # Past check (timezone-aware, full datetime, end_time)
+                    if _is_slot_past(preview.booking_date, slot.start_time, slot.end_time):
                         return Response({
                             'success': False,
                             'error': f'Slot {slot.start_time}-{slot.end_time} is in the past',
-                        }, status=status.HTTP_400_BAD_REQUEST)
-                    if preview.booking_date == today and slot.start_time <= now.time():
-                        return Response({
-                            'success': False,
-                            'error': f'Slot {slot.start_time}-{slot.end_time} has already started',
                         }, status=status.HTTP_400_BAD_REQUEST)
 
                     # Blocked check
