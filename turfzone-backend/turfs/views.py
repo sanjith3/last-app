@@ -8,8 +8,13 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.db.models import Q, Prefetch
 from django.utils import timezone
+from datetime import datetime
+import logging
 
-from .models import Turf, TurfImage, Sport, Amenity, Review, TurfStatus
+logger = logging.getLogger(__name__)
+
+from .models import Turf, TurfImage, Sport, Amenity, Review, TurfStatus, SlotMaster, SlotOffer, OfferType
+from bookings.models import BookingSlot, BookingStatus
 from .serializers import (
     TurfListSerializer,
     TurfDetailSerializer,
@@ -67,14 +72,9 @@ class TurfViewSet(viewsets.ModelViewSet):
             # Admins see all turfs
             return queryset
             
-        # Turf owners and normal users see:
-        # 1. Any approved & active turf (for public browsing)
-        # 2. ALSO any turf they own personally (for their dashboard)
-        from django.db.models import Q
-        return queryset.filter(
-            Q(status=TurfStatus.APPROVED, is_active=True) |
-            Q(owner=user)
-        )
+        # All authenticated users see only approved turfs for public browsing.
+        # Owner turfs are handled by ?my_turfs=true in the list() method.
+        return queryset.filter(status=TurfStatus.APPROVED, is_active=True)
     
     def get_serializer_class(self):
         if self.action == 'create' or self.action == 'update' or self.action == 'partial_update':
@@ -429,3 +429,308 @@ class TurfViewSet(viewsets.ModelViewSet):
                 'success': False,
                 'errors': serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
+
+    # ─── OWNER: DISABLE SLOT ──────────────────────────────────────────────────
+
+    @action(detail=True, methods=['post'])
+    def disable_slot(self, request, pk=None):
+        """
+        Owner disables a SlotMaster (is_active = False).
+        POST /api/turfs/turfs/{id}/disable_slot/
+        Body: {"slot_id": 42}
+        """
+        turf = self.get_object()
+
+        # Ownership check
+        if turf.owner != request.user:
+            return Response({
+                'success': False,
+                'error': 'You can only manage slots on your own turfs',
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        slot_id = request.data.get('slot_id')
+        if not slot_id:
+            return Response({
+                'success': False,
+                'error': 'slot_id is required',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        slot = SlotMaster.objects.filter(id=slot_id, turf=turf).first()
+        if not slot:
+            return Response({
+                'success': False,
+                'error': 'Slot not found for this turf',
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        slot.is_active = False
+        slot.save(update_fields=['is_active', 'updated_at'])
+
+        log_admin_action(request, 'slot_disabled', 'SlotMaster', slot.id, {
+            'turf_id': turf.id,
+            'turf_name': turf.name,
+            'slot': f"{slot.start_time.strftime('%H:%M')}-{slot.end_time.strftime('%H:%M')}",
+            'day': slot.get_day_of_week_display(),
+        })
+
+        logger.info(f"Slot #{slot.id} disabled by {request.user.username} on {turf.name}")
+
+        return Response({
+            'success': True,
+            'message': 'Slot disabled',
+            'slot_id': slot.id,
+            'is_active': False,
+        }, status=status.HTTP_200_OK)
+
+    # ─── OWNER: ENABLE SLOT ───────────────────────────────────────────────────
+
+    @action(detail=True, methods=['post'])
+    def enable_slot(self, request, pk=None):
+        """
+        Owner re-enables a disabled SlotMaster (is_active = True).
+        POST /api/turfs/turfs/{id}/enable_slot/
+        Body: {"slot_id": 42}
+        """
+        turf = self.get_object()
+
+        # Ownership check
+        if turf.owner != request.user:
+            return Response({
+                'success': False,
+                'error': 'You can only manage slots on your own turfs',
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        slot_id = request.data.get('slot_id')
+        if not slot_id:
+            return Response({
+                'success': False,
+                'error': 'slot_id is required',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        slot = SlotMaster.objects.filter(id=slot_id, turf=turf).first()
+        if not slot:
+            return Response({
+                'success': False,
+                'error': 'Slot not found for this turf',
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        slot.is_active = True
+        slot.save(update_fields=['is_active', 'updated_at'])
+
+        log_admin_action(request, 'slot_enabled', 'SlotMaster', slot.id, {
+            'turf_id': turf.id,
+            'turf_name': turf.name,
+            'slot': f"{slot.start_time.strftime('%H:%M')}-{slot.end_time.strftime('%H:%M')}",
+            'day': slot.get_day_of_week_display(),
+        })
+
+        logger.info(f"Slot #{slot.id} enabled by {request.user.username} on {turf.name}")
+
+        return Response({
+            'success': True,
+            'message': 'Slot enabled successfully',
+            'slot_id': slot.id,
+            'is_active': True,
+        }, status=status.HTTP_200_OK)
+
+    # ─── OWNER: CREATE OFFER ──────────────────────────────────────────────
+
+    @action(detail=True, methods=['post'])
+    def create_offer(self, request, pk=None):
+        """
+        Owner creates a SlotOffer for a specific slot.
+        POST /api/turfs/turfs/{id}/create_offer/
+        Body: {
+            "slot_id": 42,
+            "offer_type": "percentage",  // or "flat"
+            "value": 20,
+            "valid_from": "2026-02-20",
+            "valid_until": "2026-03-20",
+            "max_discount_cap": 100  // optional, for percentage only
+        }
+        """
+        turf = self.get_object()
+
+        # Ownership check
+        if turf.owner != request.user:
+            return Response({
+                'success': False,
+                'error': 'You can only create offers on your own turfs',
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        slot_id = request.data.get('slot_id')
+        offer_type = request.data.get('offer_type')
+        value = request.data.get('value')
+        valid_from_str = request.data.get('valid_from')
+        valid_until_str = request.data.get('valid_until')
+        max_cap = request.data.get('max_discount_cap')
+
+        # Validate required fields
+        if not all([slot_id, offer_type, value, valid_from_str, valid_until_str]):
+            return Response({
+                'success': False,
+                'error': 'slot_id, offer_type, value, valid_from, valid_until are required',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if offer_type not in [OfferType.PERCENTAGE, OfferType.FLAT]:
+            return Response({
+                'success': False,
+                'error': 'offer_type must be "percentage" or "flat"',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            slot = SlotMaster.objects.get(id=slot_id, turf=turf)
+        except SlotMaster.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'Slot not found for this turf',
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            valid_from = datetime.strptime(valid_from_str, '%Y-%m-%d').date()
+            valid_until = datetime.strptime(valid_until_str, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            return Response({
+                'success': False,
+                'error': 'Invalid date format. Use YYYY-MM-DD.',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if valid_from > valid_until:
+            return Response({
+                'success': False,
+                'error': 'valid_from must be before valid_until',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Offer validation: slot must be active (not disabled)
+        if not slot.is_active:
+            return Response({
+                'success': False,
+                'error': 'Cannot create offers on disabled slots',
+                'error_code': 'slot_disabled',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Offer validation: valid_from must not be in the past
+        today = timezone.localdate()
+        if valid_from < today:
+            return Response({
+                'success': False,
+                'error': 'valid_from cannot be in the past',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Offer validation: slot must not have active bookings for the offer period
+        has_active_bookings = BookingSlot.objects.filter(
+            slot_master=slot,
+            booking_date__gte=valid_from,
+            booking_date__lte=valid_until,
+        ).exclude(
+            booking__booking_status=BookingStatus.CANCELLED,
+        ).exists()
+
+        if has_active_bookings:
+            return Response({
+                'success': False,
+                'error': 'Cannot create offers for slots with active bookings in the offer period',
+                'error_code': 'slot_already_booked',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        from decimal import Decimal
+        try:
+            value_dec = Decimal(str(value))
+        except Exception:
+            return Response({
+                'success': False,
+                'error': 'value must be a valid number',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        offer = SlotOffer.objects.create(
+            slot_master=slot,
+            offer_type=offer_type,
+            value=value_dec,
+            max_discount_cap=Decimal(str(max_cap)) if max_cap else None,
+            valid_from=valid_from,
+            valid_until=valid_until,
+            is_active=True,
+        )
+
+        log_admin_action(request, 'offer_created', 'SlotOffer', offer.id, {
+            'turf_id': turf.id,
+            'turf_name': turf.name,
+            'slot_id': slot.id,
+            'slot': f"{slot.start_time.strftime('%H:%M')}-{slot.end_time.strftime('%H:%M')}",
+            'offer_type': offer_type,
+            'value': str(value_dec),
+            'valid_from': str(valid_from),
+            'valid_until': str(valid_until),
+        })
+
+        logger.info(
+            f"Offer #{offer.id} created by {request.user.username} "
+            f"on slot {slot.id} ({turf.name}): {offer}"
+        )
+
+        return Response({
+            'success': True,
+            'message': 'Offer created successfully',
+            'offer_id': offer.id,
+            'offer_type': offer.offer_type,
+            'value': str(offer.value),
+            'valid_from': str(offer.valid_from),
+            'valid_until': str(offer.valid_until),
+        }, status=status.HTTP_201_CREATED)
+
+    # ─── OWNER: DELETE (DEACTIVATE) OFFER ─────────────────────────────────
+
+    @action(detail=True, methods=['post'])
+    def delete_offer(self, request, pk=None):
+        """
+        Deactivate all active offers for a specific slot.
+        POST /api/turfs/turfs/{id}/delete_offer/
+        Body: { "slot_id": 42 }
+        """
+        turf = self.get_object()
+
+        # Ownership check
+        if turf.owner != request.user:
+            return Response({
+                'success': False,
+                'error': 'You can only manage offers on your own turfs',
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        slot_id = request.data.get('slot_id')
+        if not slot_id:
+            return Response({
+                'success': False,
+                'error': 'slot_id is required',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            slot = SlotMaster.objects.get(id=slot_id, turf=turf)
+        except SlotMaster.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'Slot not found for this turf',
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Deactivate all active offers on this slot
+        count = SlotOffer.objects.filter(
+            slot_master=slot,
+            is_active=True,
+        ).update(is_active=False)
+
+        log_admin_action(request, 'offer_deleted', 'SlotOffer', slot.id, {
+            'turf_id': turf.id,
+            'turf_name': turf.name,
+            'slot_id': slot.id,
+            'slot': f"{slot.start_time.strftime('%H:%M')}-{slot.end_time.strftime('%H:%M')}",
+            'offers_deactivated': count,
+        })
+
+        logger.info(
+            f"Offers deactivated by {request.user.username} "
+            f"on slot {slot.id} ({turf.name}): {count} offers"
+        )
+
+        return Response({
+            'success': True,
+            'message': f'{count} offer(s) deactivated',
+            'slot_id': slot.id,
+        }, status=status.HTTP_200_OK)

@@ -52,35 +52,79 @@ def _quantize(value):
     return Decimal(str(value)).quantize(QUANTIZE_PLACES, rounding=ROUND_HALF_UP)
 
 
-def _is_slot_past(booking_date, slot_start_time, slot_end_time):
+# ---------------------------------------------------------------------------
+# Canonical slot status values — single source of truth
+# ---------------------------------------------------------------------------
+SLOT_STATUS_AVAILABLE = 'available'
+SLOT_STATUS_BOOKED    = 'booked'
+SLOT_STATUS_BLOCKED   = 'blocked'
+SLOT_STATUS_PAST      = 'past'
+SLOT_STATUS_DISABLED  = 'disabled'
+
+# Map status → Flutter-friendly error code
+_STATUS_ERROR_CODE = {
+    SLOT_STATUS_DISABLED: 'slot_disabled',
+    SLOT_STATUS_PAST:     'slot_past',
+    SLOT_STATUS_BOOKED:   'slot_booked',
+    SLOT_STATUS_BLOCKED:  'slot_blocked',
+}
+
+
+def compute_slot_status(slot, booking_date, booked_ids, blocked_ids):
     """
-    Timezone-aware past-slot check using full datetime comparison.
+    SINGLE SOURCE OF TRUTH for slot state.
 
-    A slot is past once its START TIME has passed.
-    12:00:01 → slot 12:00-13:00 is DISABLED.
+    Priority order (EXACTLY):
+      1. past      (booking_date/time already elapsed)
+      2. disabled  (slot.is_active == False)
+      3. booked    (confirmed booking exists)
+      4. available
 
-    Returns True if the slot's start time has passed.
+    Returns dict:
+      {
+        'status':       str,   # "available" | "past" | "booked" | "disabled"
+        'is_available': bool,
+        'is_disabled':  bool,
+        'is_past':      bool,
+        'is_booked':    bool,
+        'is_blocked':   bool,
+      }
     """
-    now = timezone.localtime()  # Timezone-aware, local time
+    # Timezone-aware past check
+    now = timezone.localtime()
+    try:
+        slot_start_dt = timezone.make_aware(
+            datetime.combine(booking_date, slot.start_time),
+            timezone.get_current_timezone(),
+        )
+        is_past = now >= slot_start_dt
+    except Exception:
+        is_past = False
 
-    # Construct timezone-aware datetime for slot start
-    slot_start_dt = timezone.make_aware(
-        datetime.combine(booking_date, slot_start_time),
-        timezone.get_current_timezone(),
-    )
+    is_disabled = not slot.is_active
+    is_booked = slot.id in booked_ids
+    is_blocked = slot.id in blocked_ids
 
-    result = now >= slot_start_dt
+    # Priority: past > disabled > booked > available
+    if is_past:
+        slot_status = SLOT_STATUS_PAST
+    elif is_disabled:
+        slot_status = SLOT_STATUS_DISABLED
+    elif is_booked:
+        slot_status = SLOT_STATUS_BOOKED
+    else:
+        slot_status = SLOT_STATUS_AVAILABLE
 
-    print("=== SLOT DEBUG ===")
-    print("NOW:", now)
-    print("BOOKING DATE:", booking_date)
-    print("START TIME:", slot_start_time)
-    print("SLOT DATETIME:", slot_start_dt)
-    print("COMPARISON RESULT:", result)
-    print("SERVER TIMEZONE:", timezone.get_current_timezone())
-    print("==================")
+    is_available = slot_status == SLOT_STATUS_AVAILABLE
 
-    return result
+    return {
+        'status':       slot_status,
+        'is_available': is_available,
+        'is_disabled':  is_disabled,
+        'is_past':      is_past,
+        'is_booked':    is_booked,
+        'is_blocked':   is_blocked,
+    }
 
 
 def _find_best_offer_for_slot(slot_master, booking_date):
@@ -247,9 +291,7 @@ class BookingViewSet(viewsets.ModelViewSet):
         if user.role == 'admin':
             return queryset
 
-        if user.role == 'turf_owner':
-            return queryset.filter(Q(user=user) | Q(turf__owner=user))
-
+        # All non-admin users (including turf_owner) see only their OWN bookings
         return queryset.filter(user=user)
 
     def get_serializer_class(self):
@@ -502,11 +544,10 @@ class BookingViewSet(viewsets.ModelViewSet):
         # Get day of week (Monday=0, Sunday=6)
         day_of_week = booking_date.weekday()
 
-        # Fetch active slots for this day
+        # Fetch ALL slots for this day (including disabled) — never deleted slots
         slots = SlotMaster.objects.filter(
             turf=turf,
             day_of_week=day_of_week,
-            is_active=True,
         ).order_by('start_time')
 
         if not slots.exists():
@@ -535,20 +576,12 @@ class BookingViewSet(viewsets.ModelViewSet):
             ).values_list('slot_master_id', flat=True)
         )
 
-        # Current time for past-slot detection (timezone-aware)
-        now = timezone.now()
-        today = now.date()
-
-        # Debug: print selected date vs today
-        print("\n===== AVAILABILITY DEBUG =====")
-        print("SELECTED DATE:", booking_date)
-        print("TODAY:", timezone.localdate())
-        print("NOW:", timezone.localtime())
-        print("==============================\n")
-
         result_slots = []
         for slot in slots:
-            print("CALLING _is_slot_past FOR:", slot.start_time, "-", slot.end_time)
+            # --- State (single source of truth) ---
+            state = compute_slot_status(slot, booking_date, booked_slot_ids, blocked_slot_ids)
+
+            # --- Pricing (offer calc happens AFTER state, offers NOT applied to non-available) ---
             try:
                 pricing = _compute_slot_pricing(slot, booking_date)
             except Exception as e:
@@ -565,33 +598,8 @@ class BookingViewSet(viewsets.ModelViewSet):
                     'offer_value': None,
                 }
 
-            # --- A. Past check (timezone-aware, full datetime, end_time) ---
-            is_past = _is_slot_past(booking_date, slot.start_time, slot.end_time)
-
-            # --- B. Blocked check ---
-            is_blocked = slot.id in blocked_slot_ids
-
-            # --- C. Booked check (via BookingSlot table) ---
-            is_booked = slot.id in booked_slot_ids
-
-            # --- D. Final availability ---
-            is_available = not is_past and not is_blocked and not is_booked
-
-            # --- E. Status string ---
-            if is_past:
-                slot_status = 'past'
-            elif is_blocked:
-                slot_status = 'blocked'
-            elif is_booked:
-                slot_status = 'booked'
-            else:
-                slot_status = 'available'
-
-            pricing['is_available'] = is_available
-            pricing['is_past'] = is_past
-            pricing['is_blocked'] = is_blocked
-            pricing['is_booked'] = is_booked
-            pricing['status'] = slot_status
+            # Merge state into pricing
+            pricing.update(state)
             result_slots.append(pricing)
 
         return Response({
@@ -640,20 +648,19 @@ class BookingViewSet(viewsets.ModelViewSet):
                 'error': 'Invalid date format. Use YYYY-MM-DD',
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Validate slots exist and belong to this turf
+        # Validate slots exist and belong to this turf (fetch ALL, check state)
         slots = SlotMaster.objects.filter(
             id__in=slot_ids,
             turf=turf,
-            is_active=True,
         ).order_by('start_time')
 
         if slots.count() != len(slot_ids):
             return Response({
                 'success': False,
-                'error': 'One or more slot_ids are invalid or inactive',
+                'error': 'One or more slot_ids are invalid',
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # --- Check availability for each slot ---
+        # --- Check ALL slots via compute_slot_status ---
         booked_slot_ids = set(
             BookingSlot.objects.filter(
                 slot_master__in=slot_ids,
@@ -665,26 +672,14 @@ class BookingViewSet(viewsets.ModelViewSet):
             .values_list('slot_master_id', flat=True)
         )
 
-        now = timezone.now()
-        today = now.date()
-
         for slot in slots:
-            if slot.id in blocked_slot_ids:
+            state = compute_slot_status(slot, booking_date, booked_slot_ids, blocked_slot_ids)
+            if state['status'] != SLOT_STATUS_AVAILABLE:
+                error_code = _STATUS_ERROR_CODE.get(state['status'], 'slot_unavailable')
                 return Response({
                     'success': False,
-                    'error': f'Slot {slot.start_time}-{slot.end_time} is blocked',
-                }, status=status.HTTP_409_CONFLICT)
-
-            if slot.id in booked_slot_ids:
-                return Response({
-                    'success': False,
-                    'error': f'Slot {slot.start_time}-{slot.end_time} is already booked',
-                }, status=status.HTTP_409_CONFLICT)
-
-            if _is_slot_past(booking_date, slot.start_time, slot.end_time):
-                return Response({
-                    'success': False,
-                    'error': f'Slot {slot.start_time}-{slot.end_time} is in the past',
+                    'error': f"Slot {slot.start_time.strftime('%H:%M')}-{slot.end_time.strftime('%H:%M')} is {state['status']}",
+                    'error_code': error_code,
                 }, status=status.HTTP_400_BAD_REQUEST)
 
         # Compute per-slot pricing
@@ -805,7 +800,7 @@ class BookingViewSet(viewsets.ModelViewSet):
                         'error_code': 'turf_not_available_unapproved',
                     }, status=status.HTTP_400_BAD_REQUEST)
 
-                # 4. Lock SlotMaster rows (row-level PostgreSQL lock)
+                # 4. Lock SlotMaster rows (row-level lock)
                 slot_ids = [s['slot_id'] for s in preview.selected_slots]
                 slots = SlotMaster.objects.select_for_update().filter(
                     id__in=slot_ids, turf=preview.turf,
@@ -817,17 +812,12 @@ class BookingViewSet(viewsets.ModelViewSet):
                         'error': 'One or more slots are no longer valid',
                     }, status=status.HTTP_409_CONFLICT)
 
-                # 5. Re-check ALL availability inside the lock
-                now = timezone.now()
-                today = now.date()
-
+                # 5. Re-run compute_slot_status inside the lock (race-condition safe)
                 blocked_ids = set(
                     BlockedSlot.objects.filter(
                         turf=preview.turf, date=preview.booking_date,
                     ).values_list('slot_master_id', flat=True)
                 )
-
-                # Check existing BookingSlot locks (with select_for_update)
                 existing_locks = set(
                     BookingSlot.objects.select_for_update().filter(
                         slot_master__in=slot_ids,
@@ -836,26 +826,16 @@ class BookingViewSet(viewsets.ModelViewSet):
                 )
 
                 for slot in slots:
-                    # Past check (timezone-aware, full datetime, end_time)
-                    if _is_slot_past(preview.booking_date, slot.start_time, slot.end_time):
+                    state = compute_slot_status(
+                        slot, preview.booking_date, existing_locks, blocked_ids
+                    )
+                    if state['status'] != SLOT_STATUS_AVAILABLE:
+                        error_code = _STATUS_ERROR_CODE.get(state['status'], 'slot_unavailable')
                         return Response({
                             'success': False,
-                            'error': f'Slot {slot.start_time}-{slot.end_time} is in the past',
+                            'error': f"Slot {slot.start_time.strftime('%H:%M')}-{slot.end_time.strftime('%H:%M')} is {state['status']}",
+                            'error_code': error_code,
                         }, status=status.HTTP_400_BAD_REQUEST)
-
-                    # Blocked check
-                    if slot.id in blocked_ids:
-                        return Response({
-                            'success': False,
-                            'error': f'Slot {slot.start_time}-{slot.end_time} was blocked since preview',
-                        }, status=status.HTTP_409_CONFLICT)
-
-                    # Booked check (via BookingSlot lock table)
-                    if slot.id in existing_locks:
-                        return Response({
-                            'success': False,
-                            'error': f'Slot {slot.start_time}-{slot.end_time} was booked since preview',
-                        }, status=status.HTTP_409_CONFLICT)
 
                 # 6. Recalculate pricing (catch any drift)
                 slots_pricing = []
