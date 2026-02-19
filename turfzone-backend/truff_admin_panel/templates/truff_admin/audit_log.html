@@ -1,0 +1,80 @@
+{% extends "truff_admin/base.html" %}
+{% load truff_tags %}
+
+{% block title %}Audit Log — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="topbar">
+    <h1>Audit Log</h1>
+    <div class="topbar-actions">
+        <span style="color:var(--text-muted);font-size:12px;">Immutable — Read Only</span>
+    </div>
+</div>
+
+<div class="filter-bar">
+    <form method="get" style="display:flex;gap:10px;flex-wrap:wrap;">
+        <input type="text" name="q" class="form-input" placeholder="Search actor, action, model..."
+            value="{{ search_query }}" style="width:250px;">
+        <select name="action" class="form-select">
+            <option value="">All Actions</option>
+            {% for a in actions %}
+            <option value="{{ a }}" {% if current_action == a %}selected{% endif %}>{{ a }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+        <a href="/truff-admin/audit-log/" class="btn btn-outline btn-sm">Reset</a>
+    </form>
+</div>
+
+<div class="panel">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Admin</th>
+                <th>Action</th>
+                <th>Target</th>
+                <th>ID</th>
+                <th>IP</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in page %}
+            <tr>
+                <td style="white-space:nowrap;">{{ log.created_at|date:"d M Y H:i" }}</td>
+                <td>{{ log.actor_name }}</td>
+                <td><span class="badge badge-secondary">{{ log.action }}</span></td>
+                <td>{{ log.target_model }}</td>
+                <td>{{ log.target_id }}</td>
+                <td style="font-size:12px;">{{ log.ip_address|default:"-" }}</td>
+                <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;">{{ log.details }}
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="7" style="text-align:center;color:var(--text-muted);">No audit entries</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if page.has_other_pages %}
+    <div class="pagination">
+        {% if page.has_previous %}
+        <a href="?page={{ page.previous_page_number }}&q={{ search_query }}&action={{ current_action }}">← Prev</a>
+        {% endif %}
+        {% for num in page.paginator.page_range %}
+        {% if page.number == num %}
+        <span class="active">{{ num }}</span>
+        {% elif num > page.number|add:"-3" and num < page.number|add:"3" %} <a
+            href="?page={{ num }}&q={{ search_query }}&action={{ current_action }}">{{ num }}</a>
+            {% endif %}
+            {% endfor %}
+            {% if page.has_next %}
+            <a href="?page={{ page.next_page_number }}&q={{ search_query }}&action={{ current_action }}">Next →</a>
+            {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

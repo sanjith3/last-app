@@ -60,6 +60,7 @@ class CustomUserDetailSerializer(serializers.ModelSerializer):
 class TurfOwnerProfileSerializer(serializers.ModelSerializer):
     """Serializer for turf owner profile."""
     user = CustomUserBasicSerializer(read_only=True)
+    total_turfs = serializers.SerializerMethodField()
     
     class Meta:
         model = TurfOwner
@@ -67,32 +68,73 @@ class TurfOwnerProfileSerializer(serializers.ModelSerializer):
                   'total_turfs', 'total_bookings', 'total_revenue', 'rating', 'created_at']
         read_only_fields = ['id', 'total_turfs', 'total_bookings', 'total_revenue', 'created_at']
 
+    def get_total_turfs(self, obj):
+        """Always return live count instead of stored value."""
+        return obj.user.turfs.count()
+
 
 class TurfOwnerRegistrationSerializer(serializers.Serializer):
-    """Serializer for turf owner registration with Google Maps link."""
+    """Serializer for turf owner registration with Google Maps link.
+    
+    Supports multi-turf: if the email belongs to an existing turf_owner,
+    we reuse their account instead of blocking registration.
+    """
     username = serializers.CharField(min_length=3)
     email = serializers.EmailField()
-    password = serializers.CharField(write_only=True, min_length=6)
-    password_confirm = serializers.CharField(write_only=True, min_length=6)
+    password = serializers.CharField(write_only=True, min_length=6, required=False)
+    password_confirm = serializers.CharField(write_only=True, min_length=6, required=False)
     first_name = serializers.CharField()
-    last_name = serializers.CharField()
+    last_name = serializers.CharField(required=False, allow_blank=True)
     phone_number = serializers.CharField()
     google_maps_share_link = serializers.URLField()
     
     def validate(self, data):
-        if data['password'] != data.pop('password_confirm'):
+        # Look up existing user by phone number first, then email
+        phone = data.get('phone_number', '').strip()
+        existing_user = None
+        
+        if phone:
+            existing_user = User.objects.filter(phone_number=phone).first()
+        if not existing_user:
+            existing_user = User.objects.filter(email=data['email']).first()
+        
+        if existing_user:
+            # Existing user found — upgrade role if needed, reuse account
+            if existing_user.role not in ('turf_owner', 'admin'):
+                existing_user.role = 'turf_owner'
+                existing_user.save(update_fields=['role'])
+            data['_existing_user'] = existing_user
+            return data
+        
+        # New user — require password
+        if not data.get('password'):
+            raise serializers.ValidationError({'password': 'Password is required for new registration'})
+        if data.get('password') != data.pop('password_confirm', None):
             raise serializers.ValidationError({'password': 'Passwords do not match'})
         
+        # Check username uniqueness only for new users
         if User.objects.filter(username=data['username']).exists():
             raise serializers.ValidationError({'username': 'Username already exists'})
-        
-        if User.objects.filter(email=data['email']).exists():
-            raise serializers.ValidationError({'email': 'Email already registered'})
         
         return data
     
     def create(self, validated_data):
-        # Create user
+        existing_user = validated_data.pop('_existing_user', None)
+        
+        if existing_user:
+            # Existing owner — reuse account, ensure TurfOwner profile exists
+            turf_owner, _ = TurfOwner.objects.get_or_create(user=existing_user)
+            return {
+                'user': existing_user,
+                'turf_owner': turf_owner,
+                'google_maps_link': validated_data['google_maps_share_link'],
+                'is_existing_owner': True,
+            }
+        
+        # New user — create account with correct role
+        validated_data.pop('password_confirm', None)
+        google_maps_link = validated_data.pop('google_maps_share_link')
+        
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data['email'],
@@ -100,13 +142,18 @@ class TurfOwnerRegistrationSerializer(serializers.Serializer):
             first_name=validated_data['first_name'],
             last_name=validated_data['last_name'],
             phone_number=validated_data['phone_number'],
-            role='user'
+            role='turf_owner',  # Correct role
         )
         
         # Create turf owner profile
         turf_owner = TurfOwner.objects.create(user=user)
         
-        return {'user': user, 'turf_owner': turf_owner, 'google_maps_link': validated_data['google_maps_share_link']}
+        return {
+            'user': user,
+            'turf_owner': turf_owner,
+            'google_maps_link': google_maps_link,
+            'is_existing_owner': False,
+        }
 
 
 class LoginSerializer(serializers.Serializer):

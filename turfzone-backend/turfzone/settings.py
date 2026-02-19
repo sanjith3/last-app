@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     'turfs',
     'bookings',
     'finance',
+    'truff_admin_panel',
 ]
 
 MIDDLEWARE = [
@@ -60,6 +61,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'truff_admin_panel.context_processors.pending_turf_count',
             ],
         },
     },

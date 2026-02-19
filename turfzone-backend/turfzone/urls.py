@@ -24,6 +24,7 @@ urlpatterns = [
     path('api/turfs/', include('turfs.urls')),
     path('api/bookings/', include('bookings.urls')),
     path('api/finance/', include('finance.urls')),
+    path('truff-admin/', include('truff_admin_panel.urls')),
 ]
 
 if settings.DEBUG:

@@ -1,0 +1,74 @@
+{% extends "truff_admin/base.html" %}
+{% load truff_tags %}
+
+{% block title %}Revenue — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="topbar">
+    <h1>Revenue Analytics</h1>
+    <div class="topbar-actions">
+        <a href="/truff-admin/export/revenue/" class="btn btn-outline btn-sm">📥 Export CSV</a>
+    </div>
+</div>
+
+<!-- Summary KPIs -->
+<div class="kpi-grid">
+    <div class="kpi-card accent">
+        <div class="kpi-label">Gross Revenue</div>
+        <div class="kpi-value">{{ totals.total_gross|currency }}</div>
+    </div>
+    <div class="kpi-card accent">
+        <div class="kpi-label">Platform Fee</div>
+        <div class="kpi-value">{{ totals.total_platform_fee|currency }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Commission</div>
+        <div class="kpi-value">{{ totals.total_commission|currency }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">GST Collected</div>
+        <div class="kpi-value">{{ totals.total_gst|currency }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Owner Payouts</div>
+        <div class="kpi-value">{{ totals.total_owner_payout|currency }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Total Bookings</div>
+        <div class="kpi-value">{{ totals.booking_count|default:0 }}</div>
+    </div>
+</div>
+
+<!-- Monthly Breakdown Table -->
+<div class="panel">
+    <div class="panel-title">Monthly Revenue Breakdown</div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Month</th>
+                <th>Gross</th>
+                <th>Platform Fee</th>
+                <th>Commission</th>
+                <th>Owner Payout</th>
+                <th>Bookings</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in monthly %}
+            <tr>
+                <td>{{ m.month|date:"M Y" }}</td>
+                <td>₹{{ m.gross|floatformat:2|default:"0.00" }}</td>
+                <td>₹{{ m.platform_fee|floatformat:2|default:"0.00" }}</td>
+                <td>₹{{ m.commission|floatformat:2|default:"0.00" }}</td>
+                <td>₹{{ m.owner_payout|floatformat:2|default:"0.00" }}</td>
+                <td>{{ m.count }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="6" style="text-align:center;color:var(--text-muted);">No revenue data yet</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

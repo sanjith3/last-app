@@ -1,0 +1,75 @@
+{% extends "truff_admin/base.html" %}
+{% load truff_tags %}
+
+{% block title %}Owners — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="topbar">
+    <h1>Owner Management</h1>
+    <div class="topbar-actions">
+        <a href="/truff-admin/export/owners/" class="btn btn-outline btn-sm">📥 Export CSV</a>
+    </div>
+</div>
+
+<div class="filter-bar">
+    <form method="get" style="display:flex;gap:10px;">
+        <input type="text" name="q" class="form-input" placeholder="Search owners..." value="{{ search_query }}"
+            style="width:250px;">
+        <button type="submit" class="btn btn-primary btn-sm">Search</button>
+        <a href="/truff-admin/owners/" class="btn btn-outline btn-sm">Reset</a>
+    </form>
+</div>
+
+<div class="panel">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Username</th>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>Turfs</th>
+                <th>Bookings</th>
+                <th>Revenue</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for owner in page %}
+            <tr>
+                <td>{{ owner.id }}</td>
+                <td>{{ owner.username }}</td>
+                <td>{{ owner.get_full_name|default:"-" }}</td>
+                <td>{{ owner.phone_number|default:"-" }}</td>
+                <td>{{ owner.turf_count }}</td>
+                <td>{{ owner.booking_count }}</td>
+                <td>₹{{ owner.total_rev|floatformat:2|default:"0.00" }}</td>
+                <td><a href="/truff-admin/owners/{{ owner.id }}/" class="btn btn-outline btn-sm">View</a></td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="8" style="text-align:center;color:var(--text-muted);">No owners found</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if page.has_other_pages %}
+    <div class="pagination">
+        {% if page.has_previous %}
+        <a href="?page={{ page.previous_page_number }}&q={{ search_query }}">← Prev</a>
+        {% endif %}
+        {% for num in page.paginator.page_range %}
+        {% if page.number == num %}
+        <span class="active">{{ num }}</span>
+        {% elif num > page.number|add:"-3" and num < page.number|add:"3" %} <a
+            href="?page={{ num }}&q={{ search_query }}">{{ num }}</a>
+            {% endif %}
+            {% endfor %}
+            {% if page.has_next %}
+            <a href="?page={{ page.next_page_number }}&q={{ search_query }}">Next →</a>
+            {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

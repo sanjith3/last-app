@@ -9,7 +9,7 @@ class RequestDebugMiddleware:
         start = time.time()
 
         print("\n==============================")
-        print("🔥 API HIT:", request.method, request.get_full_path())
+        print("[API HIT]", request.method, request.get_full_path())
         print("Client IP:", request.META.get('REMOTE_ADDR'))
         print("Auth:", request.META.get('HTTP_AUTHORIZATION'))
         print("==============================")
@@ -18,8 +18,8 @@ class RequestDebugMiddleware:
 
         duration = round((time.time() - start) * 1000, 2)
 
-        print("✅ STATUS:", response.status_code)
-        print("⏱️ Time:", duration, "ms")
+        print("[STATUS]", response.status_code)
+        print("[TIME]", duration, "ms")
         print("==============================\n")
 
         return response

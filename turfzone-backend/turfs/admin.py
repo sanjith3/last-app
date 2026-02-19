@@ -51,7 +51,7 @@ class TurfAdmin(admin.ModelAdmin):
     def approve_turfs(self, request, queryset):
         count = 0
         for turf in queryset:
-            turf.approve()
+            turf.approve(admin=request.user)
             count += 1
         self.message_user(request, f'{count} turfs were approved.')
     approve_turfs.short_description = 'Approve selected turfs'
@@ -59,7 +59,7 @@ class TurfAdmin(admin.ModelAdmin):
     def reject_turfs(self, request, queryset):
         count = 0
         for turf in queryset:
-            turf.reject()
+            turf.reject(reason='Rejected via Django admin')
             count += 1
         self.message_user(request, f'{count} turfs were rejected.')
     reject_turfs.short_description = 'Reject selected turfs'

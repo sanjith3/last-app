@@ -1,0 +1,98 @@
+{% extends "truff_admin/base.html" %}
+{% load truff_tags %}
+
+{% block title %}PIN Requests — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="topbar">
+    <h1>PIN Change Requests</h1>
+</div>
+
+<div class="filter-bar">
+    <form method="get" style="display:flex;gap:10px;">
+        <select name="status" class="form-select">
+            <option value="">All Status</option>
+            {% for val, label in status_choices %}
+            <option value="{{ val }}" {% if current_status == val %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+        <a href="/truff-admin/pin-requests/" class="btn btn-outline btn-sm">Reset</a>
+    </form>
+</div>
+
+<div class="panel">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Owner</th>
+                <th>Phone Verified</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Resolved</th>
+                <th>Admin</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in page %}
+            <tr>
+                <td>{{ p.id }}</td>
+                <td><a href="/truff-admin/owners/{{ p.owner.id }}/">{{ p.owner.username }}</a></td>
+                <td>{{ p.phone_verified|yesno:"✅,❌" }}</td>
+                <td><span class="badge {{ p.status|status_badge }}">{{ p.status }}</span></td>
+                <td>{{ p.created_at|date:"d M Y H:i" }}</td>
+                <td>{{ p.resolved_at|date:"d M Y H:i"|default:"-" }}</td>
+                <td>{{ p.admin|default:"-" }}</td>
+                <td>
+                    {% if p.status == 'pending' %}
+                    <button class="btn btn-primary btn-sm" onclick="showPinModal({{ p.id }}, 'approve')">✅</button>
+                    <button class="btn btn-danger btn-sm" onclick="showPinModal({{ p.id }}, 'reject')">❌</button>
+                    {% else %}
+                    <span style="color:var(--text-muted);font-size:12px;">Resolved</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="8" style="text-align:center;color:var(--text-muted);">No PIN requests</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- PIN Modal -->
+<div class="modal-overlay" id="pinModal">
+    <div class="modal-box">
+        <h3 id="pinModalTitle">PIN Request Action</h3>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="request_id" id="pinReqId">
+            <input type="hidden" name="action" id="pinAction">
+            <textarea name="notes" placeholder="Admin notes (optional)..."></textarea>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-outline" onclick="hidePinModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="pinSubmitBtn">Confirm</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    function showPinModal(id, action) {
+        document.getElementById('pinReqId').value = id;
+        document.getElementById('pinAction').value = action;
+        document.getElementById('pinModalTitle').textContent =
+            action === 'approve' ? 'Approve PIN Change' : 'Reject PIN Change';
+        const btn = document.getElementById('pinSubmitBtn');
+        btn.className = action === 'approve' ? 'btn btn-primary' : 'btn btn-danger';
+        btn.textContent = action === 'approve' ? 'Approve' : 'Reject';
+        document.getElementById('pinModal').classList.add('active');
+    }
+    function hidePinModal() {
+        document.getElementById('pinModal').classList.remove('active');
+    }
+</script>
+{% endblock %}

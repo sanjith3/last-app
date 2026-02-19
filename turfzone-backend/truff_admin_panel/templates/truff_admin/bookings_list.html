@@ -1,0 +1,88 @@
+{% extends "truff_admin/base.html" %}
+{% load truff_tags %}
+
+{% block title %}Bookings — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="topbar">
+    <h1>Bookings</h1>
+    <div class="topbar-actions">
+        <a href="/truff-admin/export/bookings/" class="btn btn-outline btn-sm">📥 Export CSV</a>
+    </div>
+</div>
+
+<div class="filter-bar">
+    <form method="get" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;width:100%;">
+        <input type="text" name="q" class="form-input" placeholder="Search ID, user, turf..." value="{{ search_query }}"
+            style="width:220px;">
+        <select name="status" class="form-select">
+            <option value="">All Status</option>
+            {% for val, label in status_choices %}
+            <option value="{{ val }}" {% if current_status == val %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <input type="date" name="date_from" class="form-input" value="{{ date_from }}" title="From date">
+        <input type="date" name="date_to" class="form-input" value="{{ date_to }}" title="To date">
+        <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+        <a href="/truff-admin/bookings/" class="btn btn-outline btn-sm">Reset</a>
+    </form>
+</div>
+
+<div class="panel">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>User</th>
+                <th>Turf</th>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Status</th>
+                <th>Amount</th>
+                <th>Payout</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for b in page %}
+            <tr>
+                <td><a href="/truff-admin/bookings/{{ b.id }}/">{{ b.id }}</a></td>
+                <td>{{ b.user.username }}</td>
+                <td>{{ b.turf.name }}</td>
+                <td>{{ b.booking_date }}</td>
+                <td>{{ b.start_time|time:"H:i" }} – {{ b.end_time|time:"H:i" }}</td>
+                <td><span class="badge {{ b.booking_status|status_badge }}">{{ b.booking_status }}</span></td>
+                <td>₹{{ b.final_price }}</td>
+                <td>₹{{ b.owner_payout }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="8" style="text-align:center;color:var(--text-muted);">No bookings found</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if page.has_other_pages %}
+    <div class="pagination">
+        {% if page.has_previous %}
+        <a
+            href="?page={{ page.previous_page_number }}&q={{ search_query }}&status={{ current_status }}&date_from={{ date_from }}&date_to={{ date_to }}">←
+            Prev</a>
+        {% endif %}
+        {% for num in page.paginator.page_range %}
+        {% if page.number == num %}
+        <span class="active">{{ num }}</span>
+        {% elif num > page.number|add:"-3" and num < page.number|add:"3" %} <a
+            href="?page={{ num }}&q={{ search_query }}&status={{ current_status }}&date_from={{ date_from }}&date_to={{ date_to }}">
+            {{ num }}</a>
+            {% endif %}
+            {% endfor %}
+            {% if page.has_next %}
+            <a
+                href="?page={{ page.next_page_number }}&q={{ search_query }}&status={{ current_status }}&date_from={{ date_from }}&date_to={{ date_to }}">Next
+                →</a>
+            {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

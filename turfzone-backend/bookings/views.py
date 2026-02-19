@@ -516,7 +516,7 @@ class BookingViewSet(viewsets.ModelViewSet):
                 'date': date_str,
                 'day_of_week': day_of_week,
                 'slots': [],
-                'message': 'No slots configured for this day. Please add SlotMaster entries.',
+                'message': 'Slots not yet configured for this day.',
             }, status=status.HTTP_200_OK)
 
         # --- Booked check: use BookingSlot (database-enforced) ---
@@ -795,6 +795,15 @@ class BookingViewSet(viewsets.ModelViewSet):
                         'success': False,
                         'error': 'Preview token has expired. Please create a new preview.',
                     }, status=status.HTTP_410_GONE)
+
+                # 3b. Re-verify turf is still APPROVED (may have been suspended since preview)
+                turf = preview.turf
+                if turf.status != TurfStatus.APPROVED or not turf.is_active:
+                    return Response({
+                        'success': False,
+                        'error': 'This turf is no longer available for booking',
+                        'error_code': 'turf_not_available_unapproved',
+                    }, status=status.HTTP_400_BAD_REQUEST)
 
                 # 4. Lock SlotMaster rows (row-level PostgreSQL lock)
                 slot_ids = [s['slot_id'] for s in preview.selected_slots]

@@ -22,6 +22,7 @@ from .serializers import (
     ReviewCreateSerializer,
 )
 from core.utils import calculate_distance_haversine, find_nearby_turfs
+from truff_admin_panel.utils import log_admin_action
 
 
 class SportViewSet(viewsets.ReadOnlyModelViewSet):
@@ -91,6 +92,25 @@ class TurfViewSet(viewsets.ModelViewSet):
         """
         queryset = self.get_queryset()
         
+        # My turfs filter (Owner Dashboard mode)
+        my_turfs = request.query_params.get('my_turfs', 'false').lower() == 'true'
+        if my_turfs and request.user.is_authenticated:
+            # Owner sees ALL their turfs — no status, distance, or city filter
+            queryset = Turf.objects.select_related('owner').prefetch_related(
+                'sports', 'amenities', 'images'
+            ).filter(owner=request.user).order_by('-created_at')
+            
+            import logging
+            logger = logging.getLogger('turfs')
+            logger.info('[OWNER_DASH] user=%s turfs=%d', request.user.pk, queryset.count())
+            
+            serializer = self.get_serializer(queryset, many=True)
+            return Response({
+                'success': True,
+                'count': queryset.count(),
+                'results': serializer.data
+            }, status=status.HTTP_200_OK)
+        
         # Search filter
         search = request.query_params.get('search', '').strip()
         if search:
@@ -104,11 +124,6 @@ class TurfViewSet(viewsets.ModelViewSet):
         city = request.query_params.get('city', '').strip()
         if city:
             queryset = queryset.filter(city__icontains=city)
-        
-        # My turfs filter (Dashboard mode)
-        my_turfs = request.query_params.get('my_turfs', 'false').lower() == 'true'
-        if my_turfs and request.user.is_authenticated:
-            queryset = queryset.filter(owner=request.user)
         
         # Price filter
         min_price = request.query_params.get('min_price')
@@ -128,13 +143,13 @@ class TurfViewSet(viewsets.ModelViewSet):
                 user_lat = float(latitude)
                 user_lon = float(longitude)
                 radius = float(request.query_params.get('radius', 50))
+                is_owner = request.user.is_authenticated and request.user.role in ('turf_owner', 'admin')
                 
                 for turf in queryset:
                     distance = calculate_distance_haversine(user_lat, user_lon, turf.latitude, turf.longitude)
-                    # Add distance to turf for serialization
                     turf.distance = distance
-                    # Only include turfs within the radius
-                    if distance <= radius:
+                    # Always include: (a) within radius, or (b) owned by this user
+                    if distance <= radius or (is_owner and turf.owner_id == request.user.pk):
                         turfs_data.append(turf)
                 
                 # Sort by distance
@@ -188,10 +203,18 @@ class TurfViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             turf = serializer.save()
+
+            # Audit log for turf creation
+            log_admin_action(request, 'turf_created', 'Turf', turf.id, {
+                'turf_name': turf.name,
+                'owner': request.user.username,
+                'status': turf.status,
+            })
+
             return Response({
                 'success': True,
                 'message': 'Turf registered successfully and is pending approval',
-                'data': TurfDetailSerializer(turf).data
+                'data': TurfDetailSerializer(turf, context={'request': request}).data
             }, status=status.HTTP_201_CREATED)
         
         return Response({
@@ -215,7 +238,7 @@ class TurfViewSet(viewsets.ModelViewSet):
             return Response({
                 'success': True,
                 'message': 'Turf updated successfully',
-                'data': TurfDetailSerializer(turf).data
+                'data': TurfDetailSerializer(turf, context={'request': request}).data
             }, status=status.HTTP_200_OK)
         
         return Response({
@@ -233,12 +256,15 @@ class TurfViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_403_FORBIDDEN)
         
         turf = self.get_object()
-        turf.approve()
+        turf.approve(admin=request.user)
+        log_admin_action(request, 'turf_approved', 'Turf', turf.id, {
+            'turf_name': turf.name,
+        })
         
         return Response({
             'success': True,
             'message': 'Turf approved successfully',
-            'data': TurfDetailSerializer(turf).data
+            'data': TurfDetailSerializer(turf, context={'request': request}).data
         }, status=status.HTTP_200_OK)
     
     @action(detail=True, methods=['post'])
@@ -253,11 +279,14 @@ class TurfViewSet(viewsets.ModelViewSet):
         turf = self.get_object()
         reason = request.data.get('reason', 'Application rejected by platform admin')
         turf.reject(reason=reason)
+        log_admin_action(request, 'turf_rejected', 'Turf', turf.id, {
+            'turf_name': turf.name, 'reason': reason,
+        })
         
         return Response({
             'success': True,
             'message': 'Turf rejected successfully',
-            'data': TurfDetailSerializer(turf).data
+            'data': TurfDetailSerializer(turf, context={'request': request}).data
         }, status=status.HTTP_200_OK)
     
     @action(detail=False, methods=['get'])
@@ -270,12 +299,44 @@ class TurfViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_403_FORBIDDEN)
         
         turfs = Turf.objects.filter(status=TurfStatus.PENDING).select_related('owner').prefetch_related('sports', 'amenities', 'images')
-        serializer = TurfListSerializer(turfs, many=True)
+        serializer = TurfListSerializer(turfs, many=True, context={'request': request})
         
         return Response({
             'success': True,
             'count': turfs.count(),
             'results': serializer.data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'])
+    def resubmit(self, request, pk=None):
+        """
+        Owner resubmits a rejected turf for review.
+        POST /api/turfs/turfs/{id}/resubmit/
+        """
+        turf = self.get_object()
+
+        if turf.owner != request.user:
+            return Response({
+                'success': False,
+                'error': 'You can only resubmit your own turfs'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        if turf.status != TurfStatus.REJECTED:
+            return Response({
+                'success': False,
+                'error': 'Only rejected turfs can be resubmitted'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        turf.resubmit()
+        log_admin_action(request, 'turf_resubmitted', 'Turf', turf.id, {
+            'turf_name': turf.name,
+            'owner': request.user.username,
+        })
+
+        return Response({
+            'success': True,
+            'message': 'Turf resubmitted for review',
+            'data': TurfDetailSerializer(turf, context={'request': request}).data
         }, status=status.HTTP_200_OK)
     
     @action(detail=True, methods=['post'])
@@ -313,7 +374,7 @@ class TurfViewSet(viewsets.ModelViewSet):
             caption=request.data.get('caption', '')
         )
         
-        serializer = TurfImageSerializer(image)
+        serializer = TurfImageSerializer(image, context={'request': request})
         return Response({
             'success': True,
             'message': 'Image uploaded successfully',

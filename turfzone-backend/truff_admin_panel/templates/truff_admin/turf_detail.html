@@ -1,0 +1,185 @@
+{% extends "truff_admin/base.html" %}
+{% load truff_tags %}
+
+{% block title %}{{ turf.name }} - Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="topbar">
+    <h1>{{ turf.name }}</h1>
+    <div class="topbar-actions">
+        <a href="/truff-admin/turfs/" class="btn btn-outline btn-sm">&#8592; Back to List</a>
+    </div>
+</div>
+
+<div class="panel">
+    <div class="panel-title">Turf Details</div>
+    <div class="detail-grid">
+        <div class="detail-item"><label>ID</label><span>{{ turf.id }}</span></div>
+        <div class="detail-item"><label>Name</label><span>{{ turf.name }}</span></div>
+        <div class="detail-item"><label>City</label><span>{{ turf.city|default:"-" }}</span></div>
+        <div class="detail-item"><label>Owner</label><span><a href="/truff-admin/owners/{{ turf.owner.id }}/">{{ turf.owner.username }}</a></span></div>
+        <div class="detail-item"><label>Owner Email</label><span>{{ turf.owner.email|default:"-" }}</span></div>
+        <div class="detail-item"><label>Owner Phone</label><span>{{ turf.owner.phone_number|default:"-" }}</span></div>
+        <div class="detail-item"><label>Status</label><span class="badge {{ turf.status|status_badge }}">{{ turf.status }}</span></div>
+        <div class="detail-item"><label>Rating</label><span>{{ turf.rating }}</span></div>
+        <div class="detail-item"><label>Price/Hour</label><span>&#8377;{{ turf.price_per_hour }}</span></div>
+        <div class="detail-item"><label>Address</label><span>{{ turf.address|default:"-" }}</span></div>
+        <div class="detail-item"><label>Created</label><span>{{ turf.created_at|date:"d M Y H:i" }}</span></div>
+        <div class="detail-item"><label>Approved At</label><span>{% if turf.approved_at %}{{ turf.approved_at|date:"d M Y H:i" }}{% else %}-{% endif %}</span></div>
+        <div class="detail-item"><label>Approved By</label><span>{{ turf.approved_by.username|default:"-" }}</span>
+        </div>
+        {% if turf.rejection_reason %}
+        <div class="detail-item" style="grid-column:1/-1;">
+            <label>Rejection Reason</label>
+            <span style="color:var(--danger);">{{ turf.rejection_reason }}</span>
+        </div>
+        {% endif %}
+        {% if turf.suspend_reason %}
+        <div class="detail-item" style="grid-column:1/-1;">
+            <label>Suspend Reason</label>
+            <span style="color:var(--warning);">{{ turf.suspend_reason }}</span>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="panel">
+    <div class="panel-title">Admin Actions</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        {% if turf.status == 'pending' %}
+        <form method="post" action="/truff-admin/turfs/{{ turf.id }}/action/" style="display:inline;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="approve">
+            <button type="submit" class="btn btn-primary" onclick="return confirm('Approve this turf?')">✅
+                Approve</button>
+        </form>
+        <button class="btn btn-danger" onclick="showModal('reject')">❌ Reject</button>
+        {% endif %}
+
+        {% if turf.status == 'approved' %}
+        <button class="btn btn-warning" onclick="showModal('suspend')">⚠️ Suspend</button>
+        {% endif %}
+
+        {% if turf.status == 'suspended' or turf.status == 'rejected' %}
+        <form method="post" action="/truff-admin/turfs/{{ turf.id }}/action/" style="display:inline;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="reactivate">
+            <button type="submit" class="btn btn-primary" onclick="return confirm('Reactivate this turf?')">🔄
+                Reactivate</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+{% if images %}
+<div class="panel">
+    <div class="panel-title">Images</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        {% for img in images %}
+        <img src="{{ img.image.url }}"
+            style="width:150px;height:100px;object-fit:cover;border-radius:6px;border:1px solid var(--border);">
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<div class="panel">
+    <div class="panel-title">Recent Bookings</div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>User</th>
+                <th>Date</th>
+                <th>Status</th>
+                <th>Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for b in recent_bookings %}
+            <tr>
+                <td><a href="/truff-admin/bookings/{{ b.id }}/">{{ b.id }}</a></td>
+                <td>{{ b.user.username }}</td>
+                <td>{{ b.booking_date }}</td>
+                <td><span class="badge {{ b.booking_status|status_badge }}">{{ b.booking_status }}</span></td>
+                <td>&#8377;{{ b.final_price }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="5" style="text-align:center;color:var(--text-muted);">No bookings</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="panel">
+    <div class="panel-title">Audit Trail</div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Admin</th>
+                <th>Action</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in audit_logs %}
+            <tr>
+                <td>{{ log.created_at|date:"d M Y H:i" }}</td>
+                <td>{{ log.actor_name }}</td>
+                <td><span class="badge badge-secondary">{{ log.action }}</span></td>
+                <td style="font-size:12px;color:var(--text-muted);">{{ log.details }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="4" style="text-align:center;color:var(--text-muted);">No audit entries</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Reject / Suspend Modal -->
+<div class="modal-overlay" id="actionModal">
+    <div class="modal-box">
+        <h3 id="modalTitle">Provide Reason</h3>
+        <form method="post" action="/truff-admin/turfs/{{ turf.id }}/action/">
+            {% csrf_token %}
+            <input type="hidden" name="action" id="modalAction">
+            <textarea name="reason" placeholder="Enter reason (required)..." required></textarea>
+
+            {% if future_bookings_count > 0 %}
+            <div id="suspendBookingsOpt" style="display:none;margin-top:10px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                    <input type="checkbox" name="cancel_future_bookings">
+                    Cancel {{ future_bookings_count }} active future booking{{ future_bookings_count|pluralize }}
+                </label>
+            </div>
+            {% endif %}
+
+            <div class="modal-actions">
+                <button type="button" class="btn btn-outline" onclick="hideModal()">Cancel</button>
+                <button type="submit" class="btn btn-danger">Confirm</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    function showModal(action) {
+        document.getElementById('modalAction').value = action;
+        document.getElementById('modalTitle').textContent =
+            action === 'reject' ? 'Reject Turf' : 'Suspend Turf';
+        document.getElementById('actionModal').classList.add('active');
+
+        // Show cancel bookings checkbox only for suspend
+        var opt = document.getElementById('suspendBookingsOpt');
+        if (opt) opt.style.display = action === 'suspend' ? 'block' : 'none';
+    }
+    function hideModal() {
+        document.getElementById('actionModal').classList.remove('active');
+    }
+</script>
+{% endblock %}

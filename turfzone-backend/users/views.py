@@ -1,6 +1,9 @@
 """
 Views for users app.
 """
+import json
+import logging
+import uuid
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -10,6 +13,16 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.contrib.auth import get_user_model
 from django.db import transaction
+
+logger = logging.getLogger('users.registration')
+
+def _get_client_ip(request):
+    """Extract client IP from request."""
+    xff = request.META.get('HTTP_X_FORWARDED_FOR')
+    return xff.split(',')[0].strip() if xff else request.META.get('REMOTE_ADDR', 'unknown')
+
+# TODO: Remove after verification — temporary structured logging
+REGISTRATION_AUDIT_ENABLED = True
 
 from .serializers import (
     CustomUserRegistrationSerializer,
@@ -55,20 +68,40 @@ class UserRegistrationViewSet(viewsets.ViewSet):
     def turf_owner_register(self, request):
         """
         Register a turf owner with Google Maps share link.
+        Supports multi-turf: existing owners can call this again to add more turfs.
         Link: POST /api/users/user-registration/turf_owner_register/
         """
+        request_id = str(uuid.uuid4())[:8]
+        phone = request.data.get('phone_number', '').strip()
+        email = request.data.get('email', '').strip()
+        
         serializer = TurfOwnerRegistrationSerializer(data=request.data)
         if serializer.is_valid():
             try:
                 result = serializer.save()
                 user = result['user']
                 google_maps_link = result['google_maps_link']
+                is_existing = result.get('is_existing_owner', False)
+                
+                # Structured audit log
+                if REGISTRATION_AUDIT_ENABLED:
+                    logger.info('[REGISTRATION_AUDIT] %s', json.dumps({
+                        'request_id': request_id,
+                        'endpoint': 'turf_owner_register',
+                        'phone': phone,
+                        'email': email,
+                        'existing_user_id': user.id if is_existing else None,
+                        'branch_taken': 'reuse_existing' if is_existing else 'create_new',
+                        'ip_address': _get_client_ip(request),
+                        'user_id': user.id,
+                        'user_role': user.role,
+                    }))
                 
                 # Extract coordinates from Google Maps link
                 coords = extract_coordinates_from_google_maps_share_link(google_maps_link)
                 
                 if coords['success']:
-                    # Create initial turf as PENDING
+                    # Create turf as PENDING (works for both new and existing owners)
                     turf = Turf.objects.create(
                         owner=user,
                         name=request.data.get('turf_name', 'New Turf'),
@@ -85,22 +118,31 @@ class UserRegistrationViewSet(viewsets.ViewSet):
                     )
                     
                     refresh = RefreshToken.for_user(user)
+                    message = (
+                        'New turf added successfully. Your turf is pending approval.'
+                        if is_existing
+                        else 'Turf owner registered successfully. Your turf is pending approval.'
+                    )
                     return Response({
                         'success': True,
-                        'message': 'Turf owner registered successfully. Your turf is pending approval.',
+                        'message': message,
                         'user': CustomUserDetailSerializer(user).data,
                         'turf_id': turf.id,
+                        'total_turfs': user.turfs.count(),
                         'tokens': {
                             'refresh': str(refresh),
                             'access': str(refresh.access_token),
                         }
                     }, status=status.HTTP_201_CREATED)
                 else:
-                    # Delete user if coordinates couldn't be extracted
-                    user.delete()
+                    # Only delete user if they were just created (not existing)
+                    if not is_existing:
+                        user.delete()
                     return Response({
                         'success': False,
-                        'error': coords['message']
+                        'error': coords['message'],
+                        'error_code': 'could_not_extract_coordinates',
+                        'debug_id': coords.get('debug_id'),
                     }, status=status.HTTP_400_BAD_REQUEST)
                     
             except Exception as e:
@@ -226,15 +268,22 @@ class UserProfileViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['post'])
     def become_partner(self, request):
         """
-        Upgrade current user to turf owner and register their first turf.
+        Upgrade current user to turf owner and register a turf.
+        Can be called multiple times to add more turfs.
         Link: POST /api/users/user-profile/become_partner/
         """
         user = request.user
         data = request.data
+        request_id = str(uuid.uuid4())[:8]
         
         try:
             with transaction.atomic():
-                # 1. Get or create TurfOwner profile
+                # 1. Upgrade user role to turf_owner (idempotent)
+                if user.role != 'turf_owner' and user.role != 'admin':
+                    user.role = 'turf_owner'
+                    user.save(update_fields=['role'])
+                
+                # 2. Get or create TurfOwner profile
                 turf_owner, created = TurfOwner.objects.get_or_create(user=user)
                 if data.get('bank_account'):
                     turf_owner.bank_account = data.get('bank_account')
@@ -284,10 +333,35 @@ class UserProfileViewSet(viewsets.ViewSet):
                     amenity, _ = Amenity.objects.get_or_create(name=amenity_name)
                     turf.amenities.add(amenity)
                 
+                total_turfs = user.turfs.count()
+                is_first_turf = total_turfs == 1
+                message = (
+                    'Successfully applied to become a partner. Your turf is pending approval.'
+                    if is_first_turf
+                    else f'New turf added successfully. You now have {total_turfs} turfs.'
+                )
+                
+                # Structured audit log
+                if REGISTRATION_AUDIT_ENABLED:
+                    logger.info('[REGISTRATION_AUDIT] %s', json.dumps({
+                        'request_id': request_id,
+                        'endpoint': 'become_partner',
+                        'phone': user.phone_number or '',
+                        'email': user.email or '',
+                        'existing_user_id': user.id,
+                        'branch_taken': 'first_turf' if is_first_turf else 'additional_turf',
+                        'ip_address': _get_client_ip(request),
+                        'user_id': user.id,
+                        'user_role': user.role,
+                        'turf_id': turf.id,
+                        'total_turfs': total_turfs,
+                    }))
+                
                 return Response({
                     'success': True,
-                    'message': 'Successfully applied to become a partner. Your turf is pending approval.',
+                    'message': message,
                     'turf_id': turf.id,
+                    'total_turfs': user.turfs.count(),
                     'user': CustomUserDetailSerializer(user).data
                 }, status=status.HTTP_201_CREATED)
                 

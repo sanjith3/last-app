@@ -1,0 +1,39 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Truff-Admin Login</title>
+    <link rel="stylesheet" href="{% static 'truff_admin/css/style.css' %}">
+</head>
+
+<body>
+    <div class="login-container">
+        <div class="login-box">
+            <h1>TRUFF-ADMIN</h1>
+            <p>Corporate Dashboard — Authorized Personnel Only</p>
+
+            {% if error %}
+            <div class="login-error">{{ error }}</div>
+            {% endif %}
+
+            <form method="post">
+                {% csrf_token %}
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" name="username" class="form-input" placeholder="Enter username" required
+                        autofocus>
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" name="password" class="form-input" placeholder="Enter password" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Sign In</button>
+            </form>
+        </div>
+    </div>
+</body>
+
+</html>

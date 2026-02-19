@@ -1,0 +1,163 @@
+{% extends "truff_admin/base.html" %}
+{% load truff_tags %}
+
+{% block title %}Pending Turfs ({{ pending_count }}) — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="topbar">
+    <h1>⏳ Pending Turfs <span class="badge badge-warning">{{ pending_count }}</span></h1>
+    <div class="topbar-actions">
+        <button class="btn btn-primary btn-sm" id="bulkApproveBtn" disabled onclick="bulkAction('approve')">✅ Approve
+            Selected</button>
+        <button class="btn btn-danger btn-sm" id="bulkRejectBtn" disabled onclick="showBulkRejectModal()">❌ Reject
+            Selected</button>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="filter-bar">
+    <form method="get" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;width:100%;">
+        <input type="text" name="q" class="form-input" placeholder="Search turfs..." value="{{ search_query }}"
+            style="width:220px;">
+        <select name="city" class="form-select">
+            <option value="">All Cities</option>
+            {% for c in cities %}
+            <option value="{{ c }}" {% if current_city == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+        <a href="/truff-admin/turfs/pending/" class="btn btn-outline btn-sm">Reset</a>
+    </form>
+</div>
+
+<div class="panel">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th><input type="checkbox" id="selectAll" onclick="toggleAll(this)"></th>
+                <th>ID</th>
+                <th>Name</th>
+                <th>City</th>
+                <th>Owner</th>
+                <th>Submitted</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for turf in page %}
+            <tr>
+                <td><input type="checkbox" class="turf-cb" value="{{ turf.id }}" onchange="updateBulkBtns()"></td>
+                <td>{{ turf.id }}</td>
+                <td><a href="/truff-admin/turfs/{{ turf.id }}/">{{ turf.name }}</a></td>
+                <td>{{ turf.city|default:"-" }}</td>
+                <td><a href="/truff-admin/owners/{{ turf.owner.id }}/">{{ turf.owner.username }}</a></td>
+                <td>{{ turf.created_at|date:"d M Y H:i" }}</td>
+                <td style="display:flex;gap:6px;">
+                    <form method="post" action="/truff-admin/turfs/{{ turf.id }}/action/" style="display:inline;">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="approve">
+                        <button type="submit" class="btn btn-primary btn-sm"
+                            onclick="return confirm('Approve {{ turf.name }}?')">✅</button>
+                    </form>
+                    <a href="/truff-admin/turfs/{{ turf.id }}/" class="btn btn-outline btn-sm">View</a>
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="7" style="text-align:center;color:var(--text-muted);">No pending turfs 🎉</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if page.has_other_pages %}
+    <div class="pagination">
+        {% if page.has_previous %}
+        <a href="?page={{ page.previous_page_number }}&q={{ search_query }}&city={{ current_city }}">← Prev</a>
+        {% endif %}
+        {% for num in page.paginator.page_range %}
+        {% if page.number == num %}
+        <span class="active">{{ num }}</span>
+        {% elif num > page.number|add:"-3" and num < page.number|add:"3" %} <a
+            href="?page={{ num }}&q={{ search_query }}&city={{ current_city }}">{{ num }}</a>
+            {% endif %}
+            {% endfor %}
+            {% if page.has_next %}
+            <a href="?page={{ page.next_page_number }}&q={{ search_query }}&city={{ current_city }}">Next →</a>
+            {% endif %}
+    </div>
+    {% endif %}
+</div>
+
+<!-- Bulk Reject Modal -->
+<div class="modal-overlay" id="bulkRejectModal">
+    <div class="modal-box">
+        <h3>Reject Selected Turfs</h3>
+        <form id="bulkRejectForm">
+            {% csrf_token %}
+            <textarea name="reason" id="bulkRejectReason" placeholder="Shared rejection reason (required)..."
+                required></textarea>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-outline" onclick="hideBulkRejectModal()">Cancel</button>
+                <button type="button" class="btn btn-danger" onclick="bulkAction('reject')">Confirm Reject</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    function toggleAll(src) {
+        document.querySelectorAll('.turf-cb').forEach(cb => cb.checked = src.checked);
+        updateBulkBtns();
+    }
+
+    function getSelectedIds() {
+        return Array.from(document.querySelectorAll('.turf-cb:checked')).map(cb => parseInt(cb.value));
+    }
+
+    function updateBulkBtns() {
+        const has = getSelectedIds().length > 0;
+        document.getElementById('bulkApproveBtn').disabled = !has;
+        document.getElementById('bulkRejectBtn').disabled = !has;
+    }
+
+    function showBulkRejectModal() {
+        document.getElementById('bulkRejectModal').classList.add('active');
+    }
+    function hideBulkRejectModal() {
+        document.getElementById('bulkRejectModal').classList.remove('active');
+    }
+
+    function bulkAction(action) {
+        const ids = getSelectedIds();
+        if (!ids.length) return;
+
+        let reason = '';
+        if (action === 'reject') {
+            reason = document.getElementById('bulkRejectReason').value;
+            if (!reason) { alert('Reason is required'); return; }
+        }
+
+        if (!confirm(`${action.charAt(0).toUpperCase() + action.slice(1)} ${ids.length} turf(s)?`)) return;
+
+        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+        const formData = new FormData();
+        formData.append('csrfmiddlewaretoken', csrfToken);
+        formData.append('action', action);
+        formData.append('reason', reason);
+        formData.append('turf_ids', JSON.stringify(ids));
+
+        fetch('/truff-admin/turfs/bulk-action/', { method: 'POST', body: formData })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert(`${data.processed} turf(s) ${action}d successfully.`);
+                    location.reload();
+                } else {
+                    alert(data.error || 'Operation failed');
+                }
+            })
+            .catch(() => alert('Request failed'));
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,77 @@
+{% load static %}
+{% load truff_tags %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Truff-Admin{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'truff_admin/css/style.css' %}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+
+<body>
+    <!-- Sidebar -->
+    <nav class="sidebar">
+        <div class="sidebar-brand">
+            <h2>TRUFF-ADMIN</h2>
+            <small>Corporate Dashboard</small>
+        </div>
+        <ul class="sidebar-nav">
+            <li><a href="/truff-admin/"
+                    class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
+                    <span class="icon">📊</span> Dashboard
+                </a></li>
+            <li><a href="/truff-admin/turfs/"
+                    class="{% if request.resolver_match.url_name == 'turfs' %}active{% endif %}">
+                    <span class="icon">🏟️</span> Turfs
+                </a></li>
+            <li><a href="/truff-admin/turfs/pending/"
+                    class="{% if request.resolver_match.url_name == 'turfs_pending' %}active{% endif %}">
+                    <span class="icon">⏳</span> Pending Turfs
+                    {% if pending_turf_count %}<span class="badge badge-warning"
+                        style="margin-left:4px;font-size:11px;">{{ pending_turf_count }}</span>{% endif %}
+                </a></li>
+            <li><a href="/truff-admin/owners/"
+                    class="{% if 'owner' in request.resolver_match.url_name %}active{% endif %}">
+                    <span class="icon">👤</span> Owners
+                </a></li>
+            <li><a href="/truff-admin/bookings/"
+                    class="{% if 'booking' in request.resolver_match.url_name %}active{% endif %}">
+                    <span class="icon">📅</span> Bookings
+                </a></li>
+            <div class="sidebar-divider"></div>
+            <li><a href="/truff-admin/revenue/"
+                    class="{% if 'revenue' in request.resolver_match.url_name %}active{% endif %}">
+                    <span class="icon">💰</span> Revenue
+                </a></li>
+            <li><a href="/truff-admin/pin-requests/"
+                    class="{% if 'pin' in request.resolver_match.url_name %}active{% endif %}">
+                    <span class="icon">🔑</span> PIN Requests
+                </a></li>
+            <div class="sidebar-divider"></div>
+            <li><a href="/truff-admin/audit-log/"
+                    class="{% if 'audit' in request.resolver_match.url_name %}active{% endif %}">
+                    <span class="icon">📝</span> Audit Log
+                </a></li>
+            <li><a href="/truff-admin/settings/"
+                    class="{% if 'settings' in request.resolver_match.url_name %}active{% endif %}">
+                    <span class="icon">⚙️</span> Settings
+                </a></li>
+            <div class="sidebar-divider"></div>
+            <li><a href="/truff-admin/logout/">
+                    <span class="icon">🚪</span> Logout
+                </a></li>
+        </ul>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        {% block content %}{% endblock %}
+    </div>
+
+    {% block scripts %}{% endblock %}
+</body>
+
+</html>

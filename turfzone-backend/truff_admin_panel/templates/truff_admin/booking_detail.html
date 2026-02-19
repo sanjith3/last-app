@@ -1,0 +1,105 @@
+{% extends "truff_admin/base.html" %}
+{% load truff_tags %}
+
+{% block title %}Booking #{{ booking.id }} — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="topbar">
+    <h1>Booking #{{ booking.id }}</h1>
+    <div class="topbar-actions">
+        <a href="/truff-admin/bookings/" class="btn btn-outline btn-sm">← Back</a>
+    </div>
+</div>
+
+<!-- Details -->
+<div class="panel">
+    <div class="panel-title">Booking Details</div>
+    <div class="detail-grid">
+        <div class="detail-item"><label>User</label><span>{{ booking.user.username }}</span></div>
+        <div class="detail-item"><label>Turf</label><span><a href="/truff-admin/turfs/{{ booking.turf.id }}/">{{
+                    booking.turf.name }}</a></span></div>
+        <div class="detail-item"><label>Owner</label><span><a href="/truff-admin/owners/{{ booking.turf.owner.id }}/">{{
+                    booking.turf.owner.username }}</a></span></div>
+        <div class="detail-item"><label>Date</label><span>{{ booking.booking_date }}</span></div>
+        <div class="detail-item"><label>Time</label><span>{{ booking.start_time|time:"H:i" }} – {{
+                booking.end_time|time:"H:i" }}</span></div>
+        <div class="detail-item"><label>Booking Status</label><span
+                class="badge {{ booking.booking_status|status_badge }}">{{ booking.booking_status }}</span></div>
+        <div class="detail-item"><label>Payment Status</label><span
+                class="badge {{ booking.payment_status|status_badge }}">{{ booking.payment_status }}</span></div>
+    </div>
+</div>
+
+<!-- Financials -->
+<div class="panel">
+    <div class="panel-title">Financial Breakdown</div>
+    <div class="detail-grid">
+        <div class="detail-item"><label>Price/Hour</label><span>₹{{ booking.price_per_hour }}</span></div>
+        <div class="detail-item"><label>Total Price</label><span>₹{{ booking.total_price }}</span></div>
+        <div class="detail-item"><label>Discount</label><span>₹{{ booking.discount }}</span></div>
+        <div class="detail-item"><label>Final Price</label><span style="font-weight:700;color:var(--accent);">₹{{
+                booking.final_price }}</span></div>
+        <div class="detail-item"><label>GST Amount</label><span>₹{{ booking.gst_amount }}</span></div>
+        <div class="detail-item"><label>Commission</label><span>₹{{ booking.commission }}</span></div>
+        <div class="detail-item"><label>Platform Fee</label><span>₹{{ booking.platform_fee }}</span></div>
+        <div class="detail-item"><label>GST on Platform Fee</label><span>₹{{ booking.gst_on_platform_fee }}</span></div>
+        <div class="detail-item"><label>Owner Payout</label><span style="font-weight:700;">₹{{ booking.owner_payout
+                }}</span></div>
+        <div class="detail-item"><label>Payout Status</label><span
+                class="badge {{ booking.payout_status|status_badge }}">{{ booking.payout_status }}</span></div>
+    </div>
+</div>
+
+{% if payment %}
+<div class="panel">
+    <div class="panel-title">Payment</div>
+    <div class="detail-grid">
+        <div class="detail-item"><label>Payment ID</label><span>{{ payment.razorpay_payment_id|default:"-" }}</span>
+        </div>
+        <div class="detail-item"><label>Order ID</label><span>{{ payment.razorpay_order_id|default:"-" }}</span></div>
+        <div class="detail-item"><label>Amount</label><span>₹{{ payment.amount_paid }}</span></div>
+        <div class="detail-item"><label>Method</label><span>{{ payment.payment_method|default:"-" }}</span></div>
+        <div class="detail-item"><label>Status</label><span class="badge {{ payment.status|status_badge }}">{{
+                payment.status }}</span></div>
+        <div class="detail-item"><label>Paid At</label><span>{{ payment.created_at|date:"d M Y H:i" }}</span></div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Ledger Entries -->
+<div class="panel">
+    <div class="panel-title">Ledger Entries</div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Account</th>
+                <th>Type</th>
+                <th>Amount</th>
+                <th>Description</th>
+                <th>Time</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for entry in ledger_entries %}
+            <tr>
+                <td>{{ entry.account }}</td>
+                <td>
+                    {% if entry.entry_type == 'credit' %}
+                    <span class="badge badge-success">Credit</span>
+                    {% else %}
+                    <span class="badge badge-danger">Debit</span>
+                    {% endif %}
+                </td>
+                <td>₹{{ entry.amount }}</td>
+                <td>{{ entry.description }}</td>
+                <td>{{ entry.created_at|date:"d M Y H:i" }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="5" style="text-align:center;color:var(--text-muted);">No ledger entries</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

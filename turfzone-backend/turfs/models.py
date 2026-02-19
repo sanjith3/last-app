@@ -2,12 +2,16 @@
 Turf models for TurfZone backend.
 """
 
+import logging
+from datetime import time as dt_time
+
 from django.db import models
 from django.contrib.auth import get_user_model
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.utils import timezone
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 class TurfStatus(models.TextChoices):
@@ -68,6 +72,7 @@ class Turf(models.Model):
     # Status
     status = models.CharField(max_length=20, choices=TurfStatus.choices, default=TurfStatus.PENDING)
     rejection_reason = models.TextField(blank=True, null=True)
+    suspend_reason = models.TextField(blank=True, null=True)
     
     # Relationships
     sports = models.ManyToManyField(Sport, related_name='turfs')
@@ -87,19 +92,40 @@ class Turf(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     approved_at = models.DateTimeField(blank=True, null=True)
+    approved_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='approved_turfs',
+    )
     
     def __str__(self):
         return f"{self.name} ({self.city})"
     
-    def approve(self):
-        """Approve this turf listing."""
-        self.status = TurfStatus.APPROVED
-        self.is_active = True
-        self.approved_at = timezone.now()
-        self.rejection_reason = None
-        self.save()
-        
-        # Verify the owner and upgrade role when their first turf is approved
+    def auto_create_default_slots(self):
+        """Create default hourly SlotMaster entries for all 7 days.
+        Uses turf.price_per_hour as base_price. Skips if active slots already exist.
+        Returns number of slots created."""
+        if self.slot_masters.filter(is_active=True).exists():
+            logger.info('Turf %d already has active slots — skipping auto-create', self.pk)
+            return 0
+        slots = []
+        for day in range(7):  # Mon=0 … Sun=6
+            for hour in range(24):
+                slots.append(SlotMaster(
+                    turf=self,
+                    day_of_week=day,
+                    start_time=dt_time(hour, 0),
+                    end_time=dt_time((hour + 1) % 24, 0),
+                    base_price=self.price_per_hour,
+                    is_active=True,
+                ))
+        SlotMaster.objects.bulk_create(slots, ignore_conflicts=True)
+        logger.info('Auto-created %d default slots for turf %d', len(slots), self.pk)
+        return len(slots)
+
+    def _ensure_owner_profile(self):
+        """Ensure TurfOwner profile exists and role/stats are correct."""
+        from users.models import TurfOwner
+        # Upgrade role if needed
         if self.owner.role == 'user':
             self.owner.role = 'turf_owner'
             self.owner.is_verified = True
@@ -107,12 +133,57 @@ class Turf(models.Model):
         elif not self.owner.is_verified:
             self.owner.is_verified = True
             self.owner.save()
+        # Ensure TurfOwner profile exists
+        profile, created = TurfOwner.objects.get_or_create(user=self.owner)
+        if created:
+            logger.info('Auto-created TurfOwner profile for user %s', self.owner.pk)
+        # Recalculate total_turfs
+        profile.total_turfs = Turf.objects.filter(owner=self.owner).count()
+        profile.save(update_fields=['total_turfs'])
+
+    def approve(self, admin=None):
+        """Approve this turf listing, auto-create slots, ensure owner profile."""
+        self.status = TurfStatus.APPROVED
+        self.is_active = True
+        self.approved_at = timezone.now()
+        self.approved_by = admin
+        self.rejection_reason = None
+        self.suspend_reason = None
+        self.save()
+
+        self._ensure_owner_profile()
+        self.auto_create_default_slots()
     
     def reject(self, reason=None):
         """Reject this turf listing."""
         self.status = TurfStatus.REJECTED
+        self.is_active = False
         if reason:
             self.rejection_reason = reason
+        self.save()
+
+    def suspend(self, reason=None):
+        """Suspend this turf listing."""
+        self.status = TurfStatus.SUSPENDED
+        self.is_active = False
+        if reason:
+            self.suspend_reason = reason
+        self.save()
+
+    def reactivate(self, admin=None):
+        """Reactivate a suspended/rejected turf, ensure slots exist."""
+        self.status = TurfStatus.APPROVED
+        self.is_active = True
+        self.approved_at = timezone.now()
+        self.approved_by = admin
+        self.suspend_reason = None
+        self.save()
+        self.auto_create_default_slots()
+
+    def resubmit(self):
+        """Owner resubmits a rejected turf for review."""
+        self.status = TurfStatus.PENDING
+        self.rejection_reason = None
         self.save()
     
     class Meta:

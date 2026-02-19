@@ -1,0 +1,133 @@
+{% extends "truff_admin/base.html" %}
+{% load truff_tags %}
+
+{% block title %}Dashboard — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="topbar">
+    <h1>Dashboard</h1>
+    <div class="topbar-actions">
+        <span style="color:var(--text-muted);font-size:13px;">Welcome, {{ request.user.username }}</span>
+    </div>
+</div>
+
+<!-- KPI Cards -->
+<div class="kpi-grid">
+    <div class="kpi-card accent">
+        <div class="kpi-label">Total Platform Revenue</div>
+        <div class="kpi-value">{{ total_revenue|currency }}</div>
+    </div>
+    <div class="kpi-card accent">
+        <div class="kpi-label">Today's Revenue</div>
+        <div class="kpi-value">{{ today_revenue|currency }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Total Transactions</div>
+        <div class="kpi-value">{{ total_transactions }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Active Turfs</div>
+        <div class="kpi-value">{{ active_turfs }}</div>
+    </div>
+    <div class="kpi-card warning">
+        <div class="kpi-label">Pending Turfs</div>
+        <div class="kpi-value">{{ pending_turfs }}</div>
+    </div>
+    <div class="kpi-card danger">
+        <div class="kpi-label">Suspended Turfs</div>
+        <div class="kpi-value">{{ suspended_turfs }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Total Owners</div>
+        <div class="kpi-value">{{ total_owners }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Total Users</div>
+        <div class="kpi-value">{{ total_users }}</div>
+    </div>
+</div>
+
+<!-- Charts Row -->
+<div class="charts-grid">
+    <div class="chart-container">
+        <h3 style="font-size:14px;color:var(--text-secondary);margin-bottom:12px;">Monthly Revenue (12 months)</h3>
+        <canvas id="monthlyChart" height="200"></canvas>
+    </div>
+    <div class="chart-container">
+        <h3 style="font-size:14px;color:var(--text-secondary);margin-bottom:12px;">Daily Revenue (30 days)</h3>
+        <canvas id="dailyChart" height="200"></canvas>
+    </div>
+</div>
+
+<!-- Top Turfs -->
+<div class="panel">
+    <div class="panel-title">Top 10 Turfs by Revenue</div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Turf</th>
+                <th>Bookings</th>
+                <th>Revenue</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for t in top_turfs %}
+            <tr>
+                <td>{{ forloop.counter }}</td>
+                <td><a href="/truff-admin/turfs/{{ t.turf__id }}/">{{ t.turf__name }}</a></td>
+                <td>{{ t.bookings }}</td>
+                <td>₹{{ t.revenue|floatformat:2 }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="4" style="text-align:center;color:var(--text-muted);">No data yet</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const monthlyData = {{ monthly_revenue| safe }};
+    const dailyData = {{ daily_revenue| safe }};
+
+    const chartDefaults = {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+            x: { ticks: { color: '#8b8fa3', font: { size: 10 } }, grid: { color: '#2a2d3a' } },
+            y: { ticks: { color: '#8b8fa3', font: { size: 10 } }, grid: { color: '#2a2d3a' } },
+        }
+    };
+
+    if (monthlyData.length) {
+        new Chart(document.getElementById('monthlyChart'), {
+            type: 'bar',
+            data: {
+                labels: monthlyData.map(d => d.month),
+                datasets: [{ data: monthlyData.map(d => d.total), backgroundColor: '#22c55e', borderRadius: 4 }]
+            },
+            options: chartDefaults,
+        });
+    }
+
+    if (dailyData.length) {
+        new Chart(document.getElementById('dailyChart'), {
+            type: 'line',
+            data: {
+                labels: dailyData.map(d => d.day),
+                datasets: [{
+                    data: dailyData.map(d => d.total),
+                    borderColor: '#22c55e',
+                    backgroundColor: 'rgba(34,197,94,0.1)',
+                    fill: true, tension: 0.3, pointRadius: 2,
+                }]
+            },
+            options: chartDefaults,
+        });
+    }
+</script>
+{% endblock %}

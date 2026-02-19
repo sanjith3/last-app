@@ -27,12 +27,22 @@ class AmenitySerializer(serializers.ModelSerializer):
 
 
 class TurfImageSerializer(serializers.ModelSerializer):
-    """Serializer for turf images."""
-    
+    """Serializer for turf images — returns absolute URLs."""
+    image = serializers.SerializerMethodField()
+
     class Meta:
         model = TurfImage
         fields = ['id', 'image', 'caption', 'is_cover', 'uploaded_at']
         read_only_fields = ['id', 'uploaded_at']
+
+    def get_image(self, obj):
+        request = self.context.get('request')
+        if obj.image:
+            url = obj.image.url
+            if request:
+                return request.build_absolute_uri(url)
+            return url
+        return None
 
 
 class TurfListSerializer(serializers.ModelSerializer):
@@ -52,17 +62,21 @@ class TurfListSerializer(serializers.ModelSerializer):
             'id', 'name', 'city', 'price_per_hour', 'rating', 'review_count',
             'address', 'latitude', 'longitude', 'sports', 'amenities',
             'images', 'cover_image', 'distance', 'status', 'rejection_reason',
-            'google_maps_share_link',
+            'suspend_reason', 'google_maps_share_link',
             'has_active_offer', 'max_offer_type', 'max_offer_value',
         ]
     
     def get_cover_image(self, obj):
-        """Get the cover image URL."""
+        """Get the cover image as an absolute URL."""
         cover = obj.images.filter(is_cover=True).first()
-        if cover:
-            return cover.image.url
-        elif obj.images.exists():
-            return obj.images.first().image.url
+        if not cover and obj.images.exists():
+            cover = obj.images.first()
+        if cover and cover.image:
+            request = self.context.get('request')
+            url = cover.image.url
+            if request:
+                return request.build_absolute_uri(url)
+            return url
         return None
 
     def _get_best_offer(self, turf):
@@ -105,18 +119,25 @@ class TurfDetailSerializer(TurfListSerializer):
     owner = CustomUserBasicSerializer(read_only=True)
     reviews = serializers.SerializerMethodField()
     distance = serializers.FloatField(read_only=True, required=False)
+    approved_by_name = serializers.SerializerMethodField()
     
     class Meta:
         model = Turf
         fields = [
             'id', 'owner', 'name', 'description', 'address', 'city', 'state',
             'postal_code', 'latitude', 'longitude', 'price_per_hour', 'max_players',
-            'status', 'rejection_reason', 'rating', 'review_count', 'sports', 'amenities', 'images',
+            'status', 'rejection_reason', 'suspend_reason', 'rating', 'review_count',
+            'sports', 'amenities', 'images', 'cover_image',
             'reviews', 'is_active', 'google_maps_share_link', 'distance',
             'has_active_offer', 'max_offer_type', 'max_offer_value',
-            'created_at', 'updated_at', 'approved_at'
+            'created_at', 'updated_at', 'approved_at', 'approved_by_name',
         ]
         read_only_fields = ['id', 'owner', 'status', 'created_at', 'updated_at', 'approved_at']
+
+    def get_approved_by_name(self, obj):
+        if obj.approved_by:
+            return obj.approved_by.get_full_name() or obj.approved_by.username
+        return None
     
     def get_reviews(self, obj):
         """Get recent reviews."""
