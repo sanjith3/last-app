@@ -84,10 +84,15 @@ class TurfListSerializer(serializers.ModelSerializer):
         return None
 
     def _get_best_offer(self, turf):
-        """Find the active SlotOffer that yields the maximum absolute discount.
-        Also auto-deactivates any expired offers (valid_until < today).
+        """Find the active SlotOffer that yields the maximum absolute discount
+        AND whose slot is actually bookable (active, not past, not booked).
+        Also auto-deactivates any expired offers.
         """
+        from bookings.models import Booking, BookingStatus
+        from datetime import datetime
+
         today = timezone.localdate()
+        now = timezone.localtime()
 
         # Auto-expire: deactivate offers whose valid_until has passed
         SlotOffer.objects.filter(
@@ -96,19 +101,50 @@ class TurfListSerializer(serializers.ModelSerializer):
             valid_until__lt=today,
         ).update(is_active=False)
 
-        # Now query only genuinely valid offers
+        # All currently valid offers for this turf
         offers = SlotOffer.objects.filter(
             slot_master__turf=turf,
             is_active=True,
             valid_from__lte=today,
             valid_until__gte=today,
+            slot_master__is_active=True,   # slot not disabled by owner
         ).select_related('slot_master')
+
+        if not offers.exists():
+            return None
+
+        # Today's day-of-week (0=Monday … 6=Sunday)
+        today_dow = today.weekday()
+        current_time = now.time()
+
+        # IDs of slots already booked for today
+        booked_slot_times = set(
+            Booking.objects.filter(
+                turf=turf,
+                booking_date=today,
+                booking_status__in=[BookingStatus.CONFIRMED, BookingStatus.COMPLETED],
+            ).values_list('start_time', flat=True)
+        )
 
         best_offer = None
         best_discount = Decimal('0.00')
 
         for offer in offers:
-            discount = offer.calculate_discount(offer.slot_master.base_price)
+            slot = offer.slot_master
+
+            # If the slot is for today, enforce time + booking checks
+            if slot.day_of_week == today_dow:
+                # Skip slots whose start_time is already in the past
+                if slot.start_time <= current_time:
+                    continue
+                # Skip slots that are already booked today
+                if slot.start_time in booked_slot_times:
+                    continue
+
+            # For future days-of-week we don't filter by time/bookings
+            # (the slot will be available on that upcoming day)
+
+            discount = offer.calculate_discount(slot.base_price)
             if discount > best_discount:
                 best_discount = discount
                 best_offer = offer
