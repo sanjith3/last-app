@@ -57,6 +57,7 @@ class TurfListSerializer(serializers.ModelSerializer):
     max_offer_type = serializers.SerializerMethodField()
     max_offer_value = serializers.SerializerMethodField()
     stats = serializers.SerializerMethodField()
+    is_favorite = serializers.SerializerMethodField()
     
     class Meta:
         model = Turf
@@ -66,7 +67,7 @@ class TurfListSerializer(serializers.ModelSerializer):
             'images', 'cover_image', 'distance', 'status', 'rejection_reason',
             'suspend_reason', 'google_maps_share_link',
             'has_active_offer', 'max_offer_type', 'max_offer_value',
-            'stats',
+            'stats', 'is_favorite',
         ]
     
     def get_cover_image(self, obj):
@@ -163,6 +164,14 @@ class TurfListSerializer(serializers.ModelSerializer):
             'slots_count': slots_count,
             'avg_rating': round(review_agg['avg_rating'] or 0, 1),
         }
+
+    def get_is_favorite(self, obj):
+        """Check if the requesting user has favorited this turf."""
+        request = self.context.get('request')
+        if request and hasattr(request, 'user') and request.user.is_authenticated:
+            from users.models import UserFavorite
+            return UserFavorite.objects.filter(user=request.user, turf=obj).exists()
+        return False
 
 
 class TurfDetailSerializer(TurfListSerializer):

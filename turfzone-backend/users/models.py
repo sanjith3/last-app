@@ -42,6 +42,20 @@ class CustomUser(AbstractUser):
         ordering = ['-created_at']
 
 
+class UserFavorite(models.Model):
+    """User's favorite turfs — server-side persistence."""
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='favorites')
+    turf = models.ForeignKey('turfs.Turf', on_delete=models.CASCADE, related_name='favorited_by')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'turf')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.username} ♥ {self.turf.name}"
+
+
 class TurfOwner(models.Model):
     """Extended profile for turf owners."""
     

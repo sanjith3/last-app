@@ -32,7 +32,7 @@ from .serializers import (
     ChangePasswordSerializer,
     TurfOwnerProfileSerializer,
 )
-from .models import TurfOwner
+from .models import TurfOwner, UserFavorite
 from core.utils import extract_coordinates_from_google_maps_share_link
 from turfs.models import Turf, TurfStatus, Sport, Amenity
 
@@ -399,6 +399,97 @@ class UserProfileViewSet(viewsets.ViewSet):
             'success': False,
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
+
+    # -----------------------------------------------------------------------
+    # Favorites
+    # -----------------------------------------------------------------------
+
+    @action(detail=False, methods=['post'], url_path='favorites/toggle')
+    def toggle_favorite(self, request):
+        """
+        Toggle a turf as favorite.
+        POST /api/users/user-profile/favorites/toggle/
+        Body: { "turf_id": 7 }
+        """
+        turf_id = request.data.get('turf_id')
+        if not turf_id:
+            return Response({'success': False, 'error': 'turf_id is required'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            turf = Turf.objects.get(id=turf_id, status=TurfStatus.APPROVED)
+        except Turf.DoesNotExist:
+            return Response({'success': False, 'error': 'Turf not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        fav, created = UserFavorite.objects.get_or_create(
+            user=request.user, turf=turf,
+        )
+        if not created:
+            fav.delete()
+
+        return Response({
+            'success': True,
+            'is_favorite': created,
+        })
+
+    @action(detail=False, methods=['get'], url_path='favorites')
+    def list_favorites(self, request):
+        """
+        List all favorited turfs for the current user.
+        GET /api/users/user-profile/favorites/
+        Returns full turf objects.
+        """
+        from turfs.serializers import TurfListSerializer
+
+        fav_turf_ids = UserFavorite.objects.filter(
+            user=request.user,
+        ).values_list('turf_id', flat=True)
+
+        turfs = Turf.objects.filter(
+            id__in=fav_turf_ids,
+            status=TurfStatus.APPROVED,
+        ).prefetch_related('sports', 'amenities', 'images')
+
+        serializer = TurfListSerializer(
+            turfs, many=True,
+            context={'request': request},
+        )
+        return Response({
+            'success': True,
+            'count': turfs.count(),
+            'results': serializer.data,
+        })
+
+    @action(detail=False, methods=['post', 'get'], url_path='favorites/check')
+    def check_favorites(self, request):
+        """
+        Check favorite status.
+        GET  /api/users/user-profile/favorites/check/?turf_id=7
+        POST /api/users/user-profile/favorites/check/   body: { "turf_ids": [1,2,3] }
+        """
+        if request.method == 'GET':
+            turf_id = request.query_params.get('turf_id')
+            if not turf_id:
+                return Response({'success': False, 'error': 'turf_id is required'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            is_fav = UserFavorite.objects.filter(
+                user=request.user, turf_id=turf_id,
+            ).exists()
+            return Response({'success': True, 'is_favorite': is_fav})
+
+        # POST — bulk check
+        turf_ids = request.data.get('turf_ids', [])
+        if not turf_ids:
+            return Response({'success': True, 'favorites': {}})
+
+        fav_set = set(
+            UserFavorite.objects.filter(
+                user=request.user, turf_id__in=turf_ids,
+            ).values_list('turf_id', flat=True)
+        )
+        favorites = {str(tid): (tid in fav_set) for tid in turf_ids}
+        return Response({'success': True, 'favorites': favorites})
 
 
 class TurfOwnerProfileViewSet(viewsets.ReadOnlyModelViewSet):
