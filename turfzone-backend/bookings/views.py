@@ -17,7 +17,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from django.contrib.auth import get_user_model
 from django.db import transaction, IntegrityError
-from django.db.models import Q, F, DateTimeField, ExpressionWrapper
+from django.db.models import Q, F, Sum, Count, Avg, DateTimeField, ExpressionWrapper
 from django.utils import timezone
 
 from rest_framework import status, viewsets
@@ -1283,3 +1283,404 @@ class BookingViewSet(viewsets.ModelViewSet):
                 'success': False,
                 'error': 'An unexpected error occurred',
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # -----------------------------------------------------------------------
+    # Owner Analytics Endpoints
+    # -----------------------------------------------------------------------
+
+    def _get_owner_turfs(self, user):
+        """Return queryset of turfs owned by this user."""
+        return Turf.objects.filter(owner=user)
+
+    def _parse_period(self, period_str):
+        """
+        Return (start_date, end_date) for the given period string.
+        All dates are timezone-aware using localdate().
+        """
+        today = timezone.localdate()
+        if period_str == 'today':
+            return today, today
+        elif period_str == 'week':
+            start = today - timedelta(days=today.weekday())  # Monday
+            return start, today
+        elif period_str == 'month':
+            start = today.replace(day=1)
+            return start, today
+        elif period_str == 'quarter':
+            quarter_month = ((today.month - 1) // 3) * 3 + 1
+            start = today.replace(month=quarter_month, day=1)
+            return start, today
+        elif period_str == 'year':
+            start = today.replace(month=1, day=1)
+            return start, today
+        else:
+            # Default: this month
+            return today.replace(day=1), today
+
+    def _owner_base_qs(self, request):
+        """
+        Return (queryset, owned_turfs, turf_list) for owner analytics.
+        Queryset is filtered to confirmed/completed bookings for owned turfs.
+        Optionally filtered by turf_id query param.
+        """
+        owned_turfs = self._get_owner_turfs(request.user)
+        turf_list = list(owned_turfs.values('id', 'name', 'city'))
+
+        qs = Booking.objects.filter(
+            turf__in=owned_turfs,
+            booking_status__in=[BookingStatus.CONFIRMED, BookingStatus.COMPLETED],
+        )
+
+        turf_id = request.query_params.get('turf_id')
+        if turf_id:
+            qs = qs.filter(turf_id=turf_id)
+
+        return qs, owned_turfs, turf_list
+
+    @action(detail=False, methods=['get'], url_path='owner_dashboard')
+    def owner_dashboard(self, request):
+        """
+        Dashboard summary for turf owner.
+        GET /api/bookings/bookings/owner_dashboard/
+
+        Returns today's overview, revenue report summary, and booking analytics summary.
+        """
+        owned_turfs = self._get_owner_turfs(request.user)
+        if not owned_turfs.exists():
+            return Response({
+                'success': True,
+                'today': {'revenue': '0.00', 'bookings': 0, 'average': '0.00'},
+                'revenue_report': {'total': '0.00', 'average': '0.00', 'growth': 0.0},
+                'booking_analytics': {'total': 0, 'success_rate': 0.0, 'peak_hours': 'No data'},
+            })
+
+        today = timezone.localdate()
+
+        # Base querysets
+        confirmed_qs = Booking.objects.filter(
+            turf__in=owned_turfs,
+            booking_status__in=[BookingStatus.CONFIRMED, BookingStatus.COMPLETED],
+        )
+
+        # --- Today's Overview ---
+        today_qs = confirmed_qs.filter(booking_date=today)
+        today_agg = today_qs.aggregate(
+            revenue=Sum('owner_payout'),
+            count=Count('id'),
+            avg=Avg('owner_payout'),
+        )
+        today_revenue = today_agg['revenue'] or Decimal('0.00')
+        today_bookings = today_agg['count'] or 0
+        today_average = today_agg['avg'] or Decimal('0.00')
+
+        # --- Revenue Report Summary (all-time) ---
+        alltime_agg = confirmed_qs.aggregate(
+            total=Sum('owner_payout'),
+            avg=Avg('owner_payout'),
+            count=Count('id'),
+        )
+        alltime_total = alltime_agg['total'] or Decimal('0.00')
+        alltime_avg = alltime_agg['avg'] or Decimal('0.00')
+
+        # Month-over-month growth
+        first_of_month = today.replace(day=1)
+        if first_of_month.month == 1:
+            prev_month_start = first_of_month.replace(year=first_of_month.year - 1, month=12)
+        else:
+            prev_month_start = first_of_month.replace(month=first_of_month.month - 1)
+        prev_month_end = first_of_month - timedelta(days=1)
+
+        curr_month_rev = confirmed_qs.filter(
+            booking_date__gte=first_of_month,
+            booking_date__lte=today,
+        ).aggregate(total=Sum('owner_payout'))['total'] or Decimal('0.00')
+
+        prev_month_rev = confirmed_qs.filter(
+            booking_date__gte=prev_month_start,
+            booking_date__lte=prev_month_end,
+        ).aggregate(total=Sum('owner_payout'))['total'] or Decimal('0.00')
+
+        if prev_month_rev > 0:
+            growth = float(((curr_month_rev - prev_month_rev) / prev_month_rev) * 100)
+        else:
+            growth = 0.0 if curr_month_rev == 0 else 100.0
+
+        # --- Booking Analytics Summary ---
+        all_bookings_qs = Booking.objects.filter(turf__in=owned_turfs)
+        total_all = all_bookings_qs.count()
+        total_confirmed = confirmed_qs.count()
+        total_cancelled = all_bookings_qs.filter(
+            booking_status=BookingStatus.CANCELLED,
+        ).count()
+
+        success_rate = (total_confirmed / total_all * 100) if total_all > 0 else 0.0
+
+        # Peak hours — group by start_time hour
+        peak_hours = 'No data'
+        if total_confirmed > 0:
+            # Get hourly counts
+            hour_counts = {}
+            bookings_with_time = confirmed_qs.values_list('start_time', flat=True)
+            for t in bookings_with_time:
+                if t:
+                    h = t.hour
+                    hour_counts[h] = hour_counts.get(h, 0) + 1
+
+            if hour_counts:
+                # Find the 3-hour block with highest total
+                best_start = 0
+                best_count = 0
+                for h in range(0, 22):
+                    block_count = sum(hour_counts.get(h + i, 0) for i in range(3))
+                    if block_count > best_count:
+                        best_count = block_count
+                        best_start = h
+
+                # Format as "6-9 PM" style
+                def _fmt_hour(h):
+                    if h == 0:
+                        return '12 AM'
+                    elif h < 12:
+                        return f'{h} AM'
+                    elif h == 12:
+                        return '12 PM'
+                    else:
+                        return f'{h - 12} PM'
+
+                peak_hours = f'{_fmt_hour(best_start)}–{_fmt_hour(best_start + 3)}'
+
+        return Response({
+            'success': True,
+            'today': {
+                'revenue': str(_quantize(today_revenue)),
+                'bookings': today_bookings,
+                'average': str(_quantize(today_average)),
+            },
+            'revenue_report': {
+                'total': str(_quantize(alltime_total)),
+                'average': str(_quantize(alltime_avg)),
+                'growth': round(growth, 1),
+            },
+            'booking_analytics': {
+                'total': total_confirmed,
+                'success_rate': round(success_rate, 1),
+                'peak_hours': peak_hours,
+            },
+        })
+
+    @action(detail=False, methods=['get'], url_path='owner_revenue')
+    def owner_revenue(self, request):
+        """
+        Detailed revenue report for turf owner.
+        GET /api/bookings/bookings/owner_revenue/?period=week&turf_id=7
+
+        Returns total revenue, avg weekly, weekly trend, and daily breakdown.
+        """
+        owned_turfs = self._get_owner_turfs(request.user)
+        if not owned_turfs.exists():
+            return Response({
+                'success': True,
+                'total_revenue': '0.00',
+                'avg_weekly': '0.00',
+                'growth': 0.0,
+                'weekly_trend': {d: 0 for d in ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']},
+                'daily_breakdown': [],
+                'turfs': [],
+            })
+
+        period = request.query_params.get('period', 'week')
+        start_date, end_date = self._parse_period(period)
+
+        qs, _, turf_list = self._owner_base_qs(request)
+        period_qs = qs.filter(booking_date__gte=start_date, booking_date__lte=end_date)
+
+        # Total revenue for period
+        agg = period_qs.aggregate(
+            total=Sum('owner_payout'),
+            count=Count('id'),
+        )
+        total_revenue = agg['total'] or Decimal('0.00')
+
+        # Avg weekly: total / number of weeks in period
+        days_in_period = max((end_date - start_date).days + 1, 1)
+        weeks = max(days_in_period / 7, 1)
+        avg_weekly = total_revenue / Decimal(str(weeks))
+
+        # Growth: compare to equally-sized previous period
+        prev_end = start_date - timedelta(days=1)
+        prev_start = prev_end - timedelta(days=days_in_period - 1)
+        prev_rev = qs.filter(
+            booking_date__gte=prev_start,
+            booking_date__lte=prev_end,
+        ).aggregate(total=Sum('owner_payout'))['total'] or Decimal('0.00')
+
+        if prev_rev > 0:
+            growth = float(((total_revenue - prev_rev) / prev_rev) * 100)
+        else:
+            growth = 0.0 if total_revenue == 0 else 100.0
+
+        # Weekly trend: revenue per day of week (Mon=0, Sun=6)
+        day_keys = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+        day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        weekly_trend = {d: 0 for d in day_keys}
+        daily_breakdown = []
+
+        # Aggregate by weekday
+        day_data = {}
+        for booking in period_qs.values('booking_date', 'owner_payout'):
+            bd = booking['booking_date']
+            wd = bd.weekday()  # 0=Mon, 6=Sun
+            if wd not in day_data:
+                day_data[wd] = {'revenue': Decimal('0.00'), 'bookings': 0}
+            day_data[wd]['revenue'] += booking['owner_payout'] or Decimal('0.00')
+            day_data[wd]['bookings'] += 1
+
+        for i, key in enumerate(day_keys):
+            data = day_data.get(i, {'revenue': Decimal('0.00'), 'bookings': 0})
+            weekly_trend[key] = float(data['revenue'])
+            daily_breakdown.append({
+                'day': day_names[i],
+                'revenue': float(data['revenue']),
+                'bookings': data['bookings'],
+            })
+
+        return Response({
+            'success': True,
+            'total_revenue': str(_quantize(total_revenue)),
+            'avg_weekly': str(_quantize(avg_weekly)),
+            'growth': round(growth, 1),
+            'weekly_trend': weekly_trend,
+            'daily_breakdown': daily_breakdown,
+            'turfs': turf_list,
+        })
+
+    @action(detail=False, methods=['get'], url_path='owner_bookings_analytics')
+    def owner_bookings_analytics(self, request):
+        """
+        Detailed booking analytics for turf owner.
+        GET /api/bookings/bookings/owner_bookings_analytics/?period=month&turf_id=7
+
+        Returns total bookings, cancellation rate, peak hours, avg duration,
+        daily trend, and daily breakdown.
+        """
+        owned_turfs = self._get_owner_turfs(request.user)
+        if not owned_turfs.exists():
+            return Response({
+                'success': True,
+                'total_bookings': 0,
+                'cancellation_rate': 0.0,
+                'peak_hours': 'No data',
+                'avg_duration': 0.0,
+                'daily_trend': {d: 0 for d in ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']},
+                'daily_breakdown': [],
+                'turfs': [],
+            })
+
+        period = request.query_params.get('period', 'month')
+        start_date, end_date = self._parse_period(period)
+
+        # All bookings (including cancelled) for period to compute cancellation rate
+        all_period_qs = Booking.objects.filter(
+            turf__in=owned_turfs,
+            booking_date__gte=start_date,
+            booking_date__lte=end_date,
+        )
+        turf_id = request.query_params.get('turf_id')
+        if turf_id:
+            all_period_qs = all_period_qs.filter(turf_id=turf_id)
+
+        total_all = all_period_qs.count()
+        total_cancelled = all_period_qs.filter(
+            booking_status=BookingStatus.CANCELLED,
+        ).count()
+        cancellation_rate = (total_cancelled / total_all * 100) if total_all > 0 else 0.0
+
+        # Confirmed bookings for this period
+        confirmed_qs = all_period_qs.filter(
+            booking_status__in=[BookingStatus.CONFIRMED, BookingStatus.COMPLETED],
+        )
+        total_confirmed = confirmed_qs.count()
+
+        # Peak hours
+        peak_hours = 'No data'
+        if total_confirmed > 0:
+            hour_counts = {}
+            for t in confirmed_qs.values_list('start_time', flat=True):
+                if t:
+                    h = t.hour
+                    hour_counts[h] = hour_counts.get(h, 0) + 1
+
+            if hour_counts:
+                best_start = 0
+                best_count = 0
+                for h in range(0, 22):
+                    block_count = sum(hour_counts.get(h + i, 0) for i in range(3))
+                    if block_count > best_count:
+                        best_count = block_count
+                        best_start = h
+
+                def _fmt_h(h):
+                    if h == 0:
+                        return '12 AM'
+                    elif h < 12:
+                        return f'{h} AM'
+                    elif h == 12:
+                        return '12 PM'
+                    else:
+                        return f'{h - 12} PM'
+
+                peak_hours = f'{_fmt_h(best_start)}–{_fmt_h(best_start + 3)}'
+
+        # Average booking duration in hours
+        avg_duration = 0.0
+        if total_confirmed > 0:
+            durations = []
+            for b in confirmed_qs.values('start_time', 'end_time'):
+                st = b['start_time']
+                et = b['end_time']
+                if st and et:
+                    start_mins = st.hour * 60 + st.minute
+                    end_mins = et.hour * 60 + et.minute
+                    if end_mins > start_mins:
+                        durations.append((end_mins - start_mins) / 60.0)
+            if durations:
+                avg_duration = sum(durations) / len(durations)
+
+        # Daily trend and breakdown
+        day_keys = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+        day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        daily_trend = {d: 0 for d in day_keys}
+        day_bookings = {}
+        day_cancellations = {}
+
+        for booking in all_period_qs.values('booking_date', 'booking_status'):
+            bd = booking['booking_date']
+            wd = bd.weekday()
+            if booking['booking_status'] == BookingStatus.CANCELLED:
+                day_cancellations[wd] = day_cancellations.get(wd, 0) + 1
+            elif booking['booking_status'] in [BookingStatus.CONFIRMED, BookingStatus.COMPLETED]:
+                day_bookings[wd] = day_bookings.get(wd, 0) + 1
+
+        daily_breakdown = []
+        for i, key in enumerate(day_keys):
+            b_count = day_bookings.get(i, 0)
+            c_count = day_cancellations.get(i, 0)
+            daily_trend[key] = b_count
+            daily_breakdown.append({
+                'day': day_names[i],
+                'bookings': b_count,
+                'cancellations': c_count,
+            })
+
+        turf_list = list(owned_turfs.values('id', 'name', 'city'))
+
+        return Response({
+            'success': True,
+            'total_bookings': total_confirmed,
+            'cancellation_rate': round(cancellation_rate, 1),
+            'peak_hours': peak_hours,
+            'avg_duration': round(avg_duration, 1),
+            'daily_trend': daily_trend,
+            'daily_breakdown': daily_breakdown,
+            'turfs': turf_list,
+        })
