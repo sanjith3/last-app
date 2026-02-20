@@ -9,9 +9,69 @@
     <title>{% block title %}Truff-Admin{% endblock %}</title>
     <link rel="stylesheet" href="{% static 'truff_admin/css/style.css' %}">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        /* Call notification toast */
+        #call-toast-container {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .call-toast {
+            background: #1a1a2e;
+            color: #fff;
+            padding: 12px 20px;
+            border-radius: 8px;
+            border-left: 4px solid #e94560;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, .4);
+            animation: slideIn .3s ease;
+            min-width: 300px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .call-toast a {
+            color: #e94560;
+            text-decoration: underline;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .call-badge {
+            background: #e94560;
+            color: #fff;
+            border-radius: 50%;
+            font-size: 11px;
+            min-width: 20px;
+            height: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-left: 6px;
+            font-weight: 700;
+        }
+    </style>
 </head>
 
 <body>
+    <!-- Toast container for call notifications -->
+    <div id="call-toast-container"></div>
+
     <!-- Sidebar -->
     <nav class="sidebar">
         <div class="sidebar-brand">
@@ -41,7 +101,16 @@
                     class="{% if 'booking' in request.resolver_match.url_name %}active{% endif %}">
                     <span class="icon">📅</span> Bookings
                 </a></li>
+            <li><a href="/truff-admin/users/"
+                    class="{% if 'user' in request.resolver_match.url_name %}active{% endif %}">
+                    <span class="icon">👥</span> Users
+                </a></li>
             <div class="sidebar-divider"></div>
+            <li><a href="/truff-admin/calls/queue/"
+                    class="{% if 'call' in request.resolver_match.url_name %}active{% endif %}">
+                    <span class="icon">📞</span> Calls
+                    <span class="call-badge" id="call-badge" style="display:none;">0</span>
+                </a></li>
             <li><a href="/truff-admin/revenue/"
                     class="{% if 'revenue' in request.resolver_match.url_name %}active{% endif %}">
                     <span class="icon">💰</span> Revenue
@@ -70,6 +139,76 @@
     <div class="main-content">
         {% block content %}{% endblock %}
     </div>
+
+    <!-- Call notification polling -->
+    <script>
+        (function () {
+            let lastKnownIds = new Set();
+
+            function pollPendingCalls() {
+                fetch('/truff-admin/calls/pending/json/')
+                    .then(r => {
+                        if (!r.ok) return null;
+                        return r.json();
+                    })
+                    .then(data => {
+                        if (!data) return;
+
+                        // Update badge
+                        const badge = document.getElementById('call-badge');
+                        if (badge) {
+                            if (data.count > 0) {
+                                badge.textContent = data.count;
+                                badge.style.display = 'inline-flex';
+                            } else {
+                                badge.style.display = 'none';
+                            }
+                        }
+
+                        // Show toast for NEW calls only
+                        const container = document.getElementById('call-toast-container');
+                        if (container && data.calls) {
+                            data.calls.forEach(call => {
+                                if (!lastKnownIds.has(call.id)) {
+                                    lastKnownIds.add(call.id);
+                                    const toast = document.createElement('div');
+                                    toast.className = 'call-toast';
+                                    toast.innerHTML = `📞 New call from <strong>${call.owner_name}</strong> for ${call.turf_name} — <a href="/truff-admin/calls/queue/">View Queue</a>`;
+                                    container.appendChild(toast);
+                                    // Auto-remove after 8s
+                                    setTimeout(() => toast.remove(), 8000);
+                                }
+                            });
+                        }
+
+                        // Clean up removed IDs
+                        const currentIds = new Set(data.calls.map(c => c.id));
+                        lastKnownIds.forEach(id => {
+                            if (!currentIds.has(id)) lastKnownIds.delete(id);
+                        });
+                    })
+                    .catch(() => { }); // Silent fail
+            }
+
+            // Initial poll (populate badge without toasts)
+            fetch('/truff-admin/calls/pending/json/')
+                .then(r => r.ok ? r.json() : null)
+                .then(data => {
+                    if (!data) return;
+                    const badge = document.getElementById('call-badge');
+                    if (badge && data.count > 0) {
+                        badge.textContent = data.count;
+                        badge.style.display = 'inline-flex';
+                    }
+                    // Seed known IDs so initial load doesn't show toasts
+                    if (data.calls) data.calls.forEach(c => lastKnownIds.add(c.id));
+                })
+                .catch(() => { });
+
+            // Poll every 10 seconds
+            setInterval(pollPendingCalls, 10000);
+        })();
+    </script>
 
     {% block scripts %}{% endblock %}
 </body>

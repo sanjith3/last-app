@@ -25,7 +25,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 
-from .models import Booking, BookingPreview, BookingSlot, Payment, BookingStatus, PaymentStatus
+from .models import Booking, BookingPreview, BookingSlot, Payment, BookingStatus, PaymentStatus, CallRecord, CallStatus
 from .serializers import (
     BookingListSerializer,
     BookingDetailSerializer,
@@ -33,6 +33,8 @@ from .serializers import (
     BookingUpdateSerializer,
     BookingCancelSerializer,
     BookingConfirmSerializer,
+    OwnerBookingSerializer,
+    CallRecordSerializer,
 )
 from turfs.models import Turf, SlotMaster, SlotOffer, BlockedSlot, OfferType, TurfStatus
 
@@ -70,6 +72,19 @@ _STATUS_ERROR_CODE = {
 }
 
 
+def _is_slot_past(booking_date, start_time, end_time=None):
+    """Return True if the slot's start_time has already passed on booking_date."""
+    now = timezone.localtime()
+    try:
+        slot_start_dt = timezone.make_aware(
+            datetime.combine(booking_date, start_time),
+            timezone.get_current_timezone(),
+        )
+        return now >= slot_start_dt
+    except Exception:
+        return False
+
+
 def compute_slot_status(slot, booking_date, booked_ids, blocked_ids):
     """
     SINGLE SOURCE OF TRUTH for slot state.
@@ -90,16 +105,7 @@ def compute_slot_status(slot, booking_date, booked_ids, blocked_ids):
         'is_blocked':   bool,
       }
     """
-    # Timezone-aware past check
-    now = timezone.localtime()
-    try:
-        slot_start_dt = timezone.make_aware(
-            datetime.combine(booking_date, slot.start_time),
-            timezone.get_current_timezone(),
-        )
-        is_past = now >= slot_start_dt
-    except Exception:
-        is_past = False
+    is_past = _is_slot_past(booking_date, slot.start_time)
 
     is_disabled = not slot.is_active
     is_booked = slot.id in booked_ids
@@ -496,6 +502,111 @@ class BookingViewSet(viewsets.ModelViewSet):
                 'all_bookings': debug_bookings,
             },
         }, status=status.HTTP_200_OK)
+
+
+    # -----------------------------------------------------------------------
+    # OWNER BOOKINGS — bookings on turfs owned by requesting user
+    # -----------------------------------------------------------------------
+    @action(detail=False, methods=['get'], url_path='owner_bookings')
+    def owner_bookings(self, request):
+        """
+        List bookings for all turfs owned by the requesting user.
+        Phone numbers are MASKED — owner never sees real customer phone.
+
+        GET /api/bookings/bookings/owner_bookings/
+        Filters: ?turf_id=, ?status=, ?date=
+        """
+        owned_turfs = Turf.objects.filter(owner=request.user)
+        if not owned_turfs.exists():
+            return Response({
+                'success': True,
+                'count': 0,
+                'results': [],
+            })
+
+        queryset = Booking.objects.select_related(
+            'turf', 'user'
+        ).filter(turf__in=owned_turfs).order_by('-booking_date', '-start_time')
+
+        # Optional filters
+        turf_id = request.query_params.get('turf_id')
+        if turf_id:
+            queryset = queryset.filter(turf_id=turf_id)
+
+        status_filter = request.query_params.get('status')
+        if status_filter:
+            queryset = queryset.filter(booking_status=status_filter)
+
+        date_filter = request.query_params.get('date')
+        if date_filter:
+            queryset = queryset.filter(booking_date=date_filter)
+
+        serializer = OwnerBookingSerializer(queryset, many=True)
+        return Response({
+            'success': True,
+            'count': queryset.count(),
+            'results': serializer.data,
+        })
+
+    # -----------------------------------------------------------------------
+    # INITIATE CALL — privacy-protected calling
+    # -----------------------------------------------------------------------
+    @action(detail=True, methods=['post'], url_path='initiate_call')
+    def initiate_call(self, request, pk=None):
+        """
+        Owner initiates a call to a customer via admin conference system.
+        Creates a CallRecord. Telephony hook point for Twilio/Exotel later.
+
+        POST /api/bookings/bookings/{id}/initiate_call/
+        """
+        try:
+            booking = Booking.objects.select_related('turf', 'user').get(pk=pk)
+        except Booking.DoesNotExist:
+            return Response(
+                {'success': False, 'error': 'Booking not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Verify the requesting user owns the turf
+        if booking.turf.owner != request.user:
+            return Response(
+                {'success': False, 'error': 'You do not own this turf'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Check booking is in callable state
+        if booking.booking_status not in [
+            BookingStatus.CONFIRMED, BookingStatus.COMPLETED
+        ]:
+            return Response(
+                {'success': False, 'error': 'Can only call for confirmed bookings'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Create call record
+        call_record = CallRecord.objects.create(
+            booking=booking,
+            initiated_by=request.user,
+            status=CallStatus.INITIATED,
+        )
+
+        logger.info(
+            '[CALL_INITIATED] call_id=%s booking_id=%s owner=%s',
+            call_record.pk, booking.pk, request.user.pk,
+        )
+
+        # TODO: Telephony integration point
+        # When Twilio/Exotel is configured:
+        # 1. Create conference room
+        # 2. Call owner at their registered number
+        # 3. Call customer at their REAL number (hidden from owner)
+        # 4. Update call_record with conference_id
+
+        return Response({
+            'success': True,
+            'call_id': call_record.pk,
+            'message': 'Call initiated. You will receive a call shortly.',
+        })
 
 
     # -----------------------------------------------------------------------
@@ -1007,6 +1118,13 @@ class BookingViewSet(viewsets.ModelViewSet):
             return Response({
                 'success': False,
                 'error': 'turf_id, booking_date, and slot_ids are required',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Free booking: only one slot allowed
+        if len(slot_ids) != 1:
+            return Response({
+                'success': False,
+                'error': 'Only one slot allowed for free booking',
             }, status=status.HTTP_400_BAD_REQUEST)
 
         try:

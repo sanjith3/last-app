@@ -1,0 +1,132 @@
+{% extends "truff_admin/base.html" %}
+{% load truff_tags %}
+
+{% block title %}Call Queue — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="topbar">
+    <h1>📞 Call Queue</h1>
+    <div class="topbar-actions">
+        <a href="/truff-admin/calls/" class="btn btn-outline btn-sm">📋 All Calls</a>
+    </div>
+</div>
+
+<!-- Pending Calls -->
+<div class="panel">
+    <div class="panel-title">🔴 Pending Calls ({{ pending_calls|length }})</div>
+    <table class="data-table" id="pending-calls-table">
+        <thead>
+            <tr>
+                <th>Call ID</th>
+                <th>Booking</th>
+                <th>Turf</th>
+                <th>Owner (caller)</th>
+                <th>Customer</th>
+                <th>Customer Phone</th>
+                <th>Requested</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in pending_calls %}
+            <tr id="call-row-{{ c.id }}">
+                <td>{{ c.id }}</td>
+                <td><a href="/truff-admin/bookings/{{ c.booking.id }}/">#{{ c.booking.id }}</a></td>
+                <td>{{ c.booking.turf.name }}</td>
+                <td>{{ c.initiated_by.first_name }} {{ c.initiated_by.last_name }}</td>
+                <td>{{ c.booking.user.first_name }} {{ c.booking.user.last_name }}</td>
+                <td><strong>{{ c.booking.user.phone_number|default:"—" }}</strong></td>
+                <td>{{ c.started_at|date:"H:i:s" }}</td>
+                <td style="display:flex;gap:6px;">
+                    <button class="btn btn-primary btn-sm" onclick="callAction({{ c.id }}, 'connect')">🔗
+                        Connect</button>
+                    <button class="btn btn-outline btn-sm" onclick="callAction({{ c.id }}, 'acknowledge')">👁️
+                        Acknowledge</button>
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="8" style="text-align:center;color:var(--text-muted);">
+                    ✅ No pending calls — all clear!
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Active Calls -->
+{% if active_calls %}
+<div class="panel">
+    <div class="panel-title">🟢 Active Calls ({{ active_calls|length }})</div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Call ID</th>
+                <th>Booking</th>
+                <th>Turf</th>
+                <th>Owner</th>
+                <th>Customer</th>
+                <th>Connected Since</th>
+                <th>Duration</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in active_calls %}
+            <tr>
+                <td><a href="/truff-admin/calls/{{ c.id }}/">{{ c.id }}</a></td>
+                <td>#{{ c.booking.id }}</td>
+                <td>{{ c.booking.turf.name }}</td>
+                <td>{{ c.initiated_by.first_name }} {{ c.initiated_by.last_name }}</td>
+                <td>{{ c.booking.user.first_name }} {{ c.booking.user.last_name }}</td>
+                <td>{{ c.admin_acknowledged_at|date:"H:i:s"|default:"—" }}</td>
+                <td>{{ c.duration_seconds }}s</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function getCsrfToken() {
+        const name = 'csrftoken';
+        const cookies = document.cookie.split(';');
+        for (let c of cookies) {
+            c = c.trim();
+            if (c.startsWith(name + '=')) return c.substring(name.length + 1);
+        }
+        return '';
+    }
+
+    function callAction(callId, action) {
+        fetch(`/truff-admin/calls/${callId}/${action}/`, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCsrfToken(),
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+        })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    // Remove the row from the table
+                    const row = document.getElementById(`call-row-${callId}`);
+                    if (row) row.remove();
+
+                    // Check if table is now empty
+                    const tbody = document.querySelector('#pending-calls-table tbody');
+                    if (tbody && tbody.children.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);">✅ No pending calls — all clear!</td></tr>';
+                    }
+                }
+            })
+            .catch(err => console.error('Call action failed:', err));
+    }
+
+    // Auto-refresh the queue page every 15 seconds
+    setInterval(() => { location.reload(); }, 15000);
+</script>
+{% endblock %}

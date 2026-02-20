@@ -1,0 +1,102 @@
+{% extends "truff_admin/base.html" %}
+{% load truff_tags %}
+
+{% block title %}Users — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="topbar">
+    <h1>👥 User Management <small style="color:var(--text-muted);font-size:14px;">({{ total_users }} total)</small></h1>
+    <div class="topbar-actions">
+        <a href="/truff-admin/export/users/" class="btn btn-outline btn-sm">📥 Export CSV</a>
+    </div>
+</div>
+
+<div class="filter-bar">
+    <form method="get" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;width:100%;">
+        <input type="text" name="q" class="form-input" placeholder="Search name, email, phone..."
+            value="{{ search_query }}" style="width:220px;">
+        <select name="verified" class="form-select">
+            <option value="">All Status</option>
+            <option value="yes" {% if verified_filter=='yes' %}selected{% endif %}>✅ Verified</option>
+            <option value="no" {% if verified_filter=='no' %}selected{% endif %}>❌ Unverified</option>
+        </select>
+        <input type="date" name="date_from" class="form-input" value="{{ date_from }}" title="Joined from">
+        <input type="date" name="date_to" class="form-input" value="{{ date_to }}" title="Joined to">
+        <select name="sort" class="form-select">
+            <option value="-joined" {% if current_sort=='-joined' %}selected{% endif %}>Newest First</option>
+            <option value="joined" {% if current_sort=='joined' %}selected{% endif %}>Oldest First</option>
+            <option value="-bookings" {% if current_sort=='-bookings' %}selected{% endif %}>Most Bookings</option>
+            <option value="-spent" {% if current_sort=='-spent' %}selected{% endif %}>Highest Spender</option>
+            <option value="name" {% if current_sort=='name' %}selected{% endif %}>Name A-Z</option>
+        </select>
+        <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+        <a href="/truff-admin/users/" class="btn btn-outline btn-sm">Reset</a>
+    </form>
+</div>
+
+<div class="panel">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Bookings</th>
+                <th>Total Spent</th>
+                <th>Joined</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for u in page %}
+            <tr>
+                <td>{{ u.id }}</td>
+                <td>{{ u.get_full_name|default:u.username }}</td>
+                <td>{{ u.email|default:"—" }}</td>
+                <td>{{ u.phone_number|default:"—" }}</td>
+                <td>{{ u.booking_count }}</td>
+                <td>₹{{ u.total_spent|floatformat:2|default:"0.00" }}</td>
+                <td>{{ u.created_at|date:"d M Y" }}</td>
+                <td>
+                    {% if u.is_verified %}
+                    <span class="badge badge-success">Verified</span>
+                    {% else %}
+                    <span class="badge badge-warning">Unverified</span>
+                    {% endif %}
+                </td>
+                <td><a href="/truff-admin/users/{{ u.id }}/" class="btn btn-outline btn-sm">View</a></td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="9" style="text-align:center;color:var(--text-muted);">No users found</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if page.has_other_pages %}
+    <div class="pagination">
+        {% if page.has_previous %}
+        <a
+            href="?page={{ page.previous_page_number }}&q={{ search_query }}&verified={{ verified_filter }}&date_from={{ date_from }}&date_to={{ date_to }}&sort={{ current_sort }}">←
+            Prev</a>
+        {% endif %}
+        {% for num in page.paginator.page_range %}
+        {% if page.number == num %}
+        <span class="active">{{ num }}</span>
+        {% elif num > page.number|add:"-3" and num < page.number|add:"3" %} <a
+            href="?page={{ num }}&q={{ search_query }}&verified={{ verified_filter }}&date_from={{ date_from }}&date_to={{ date_to }}&sort={{ current_sort }}">
+            {{ num }}</a>
+            {% endif %}
+            {% endfor %}
+            {% if page.has_next %}
+            <a
+                href="?page={{ page.next_page_number }}&q={{ search_query }}&verified={{ verified_filter }}&date_from={{ date_from }}&date_to={{ date_to }}&sort={{ current_sort }}">Next
+                →</a>
+            {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -159,3 +159,105 @@ class BookingConfirmSerializer(serializers.Serializer):
         """Confirm the booking."""
         instance.confirm()
         return instance
+
+
+# ---------------------------------------------------------------------------
+# Phone masking utility
+# ---------------------------------------------------------------------------
+
+def mask_phone_number(phone):
+    """
+    Mask a phone number for owner-facing APIs.
+    +919876543210  →  +91 XXXX XX3210
+    Never expose full number to turf owners.
+    """
+    if not phone:
+        return None
+    # Strip spaces and non-digits (except leading +)
+    clean = phone.strip()
+    digits = ''.join(c for c in clean if c.isdigit())
+    if len(digits) < 4:
+        return '+91 XXXX XXXX'
+    last4 = digits[-4:]
+    return f'+91 XXXX XX{last4}'
+
+
+# ---------------------------------------------------------------------------
+# Owner-facing booking serializer (phone masked)
+# ---------------------------------------------------------------------------
+
+class OwnerBookingSerializer(serializers.ModelSerializer):
+    """
+    Booking details for turf owners.
+    Shows customer name but MASKS their phone number.
+    """
+    customer_name = serializers.SerializerMethodField()
+    customer_phone = serializers.SerializerMethodField()
+    turf_name = serializers.CharField(source='turf.name', read_only=True)
+    turf_id = serializers.IntegerField(source='turf.id', read_only=True)
+
+    class Meta:
+        model = Booking
+        fields = [
+            'id', 'turf_id', 'turf_name',
+            'customer_name', 'customer_phone',
+            'booking_date', 'start_time', 'end_time',
+            'selected_slots',
+            'total_price', 'final_price', 'owner_payout',
+            'booking_status', 'payment_status',
+            'created_at',
+        ]
+
+    def get_customer_name(self, booking):
+        user = booking.user
+        full = f'{user.first_name} {user.last_name}'.strip()
+        return full or user.username or 'Customer'
+
+    def get_customer_phone(self, booking):
+        """Always return masked phone — never the real number."""
+        return mask_phone_number(getattr(booking.user, 'phone_number', None))
+
+
+# ---------------------------------------------------------------------------
+# Call record serializer (admin-only — shows real data)
+# ---------------------------------------------------------------------------
+
+class CallRecordSerializer(serializers.ModelSerializer):
+    """Full call record for admin dashboard. Shows real phone numbers."""
+    booking_ref = serializers.CharField(source='booking.id', read_only=True)
+    owner_name = serializers.SerializerMethodField()
+    customer_name = serializers.SerializerMethodField()
+    customer_phone = serializers.SerializerMethodField()
+    owner_phone = serializers.SerializerMethodField()
+    turf_name = serializers.CharField(
+        source='booking.turf.name', read_only=True
+    )
+
+    class Meta:
+        from .models import CallRecord
+        model = CallRecord
+        fields = [
+            'id', 'booking_ref', 'turf_name',
+            'owner_name', 'owner_phone',
+            'customer_name', 'customer_phone',
+            'conference_id', 'status',
+            'owner_called', 'customer_called',
+            'started_at', 'ended_at', 'duration_seconds',
+            'recording_url',
+        ]
+
+    def get_owner_name(self, record):
+        u = record.initiated_by
+        return f'{u.first_name} {u.last_name}'.strip() or u.username
+
+    def get_customer_name(self, record):
+        u = record.booking.user
+        return f'{u.first_name} {u.last_name}'.strip() or u.username
+
+    def get_customer_phone(self, record):
+        """Admin sees REAL phone number."""
+        return getattr(record.booking.user, 'phone_number', None)
+
+    def get_owner_phone(self, record):
+        """Admin sees REAL owner phone number."""
+        return getattr(record.initiated_by, 'phone_number', None)

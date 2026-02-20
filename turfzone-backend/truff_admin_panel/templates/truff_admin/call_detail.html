@@ -1,0 +1,88 @@
+{% extends "truff_admin/base.html" %}
+
+{% block title %}Call #{{ call.id }} — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="topbar">
+    <h1>📞 Call #{{ call.id }}</h1>
+    <div class="topbar-actions">
+        <a href="/truff-admin/calls/" class="btn btn-outline btn-sm">← Back to Calls</a>
+    </div>
+</div>
+
+<div class="panel" style="max-width:700px;">
+    <table class="data-table">
+        <tbody>
+            <tr>
+                <td><strong>Call ID</strong></td>
+                <td>{{ call.id }}</td>
+            </tr>
+            <tr>
+                <td><strong>Status</strong></td>
+                <td>
+                    <span class="badge
+                    {% if call.status == 'completed' %}badge-success
+                    {% elif call.status == 'connected' %}badge-info
+                    {% elif call.status == 'initiated' %}badge-warning
+                    {% else %}badge-danger{% endif %}
+                ">{{ call.status }}</span>
+                </td>
+            </tr>
+            <tr>
+                <td><strong>Booking</strong></td>
+                <td><a href="/truff-admin/bookings/{{ call.booking.id }}/">#{{ call.booking.id }}</a></td>
+            </tr>
+            <tr>
+                <td><strong>Turf</strong></td>
+                <td>{{ call.booking.turf.name }}</td>
+            </tr>
+            <tr>
+                <td><strong>Owner (initiated by)</strong></td>
+                <td>
+                    {{ call.initiated_by.first_name }} {{ call.initiated_by.last_name }}
+                    <br><small style="color:var(--text-muted);">📱 {{ call.initiated_by.phone_number|default:"N/A"
+                        }}</small>
+                </td>
+            </tr>
+            <tr>
+                <td><strong>Customer</strong></td>
+                <td>
+                    {{ call.booking.user.first_name }} {{ call.booking.user.last_name }}
+                    <br><strong style="color:var(--primary);">📱 {{ call.booking.user.phone_number|default:"N/A"
+                        }}</strong>
+                </td>
+            </tr>
+            <tr>
+                <td><strong>Conference ID</strong></td>
+                <td>{{ call.conference_id|default:"Not assigned" }}</td>
+            </tr>
+            <tr>
+                <td><strong>Owner Called</strong></td>
+                <td>{% if call.owner_called %}✅ Yes{% else %}❌ No{% endif %}</td>
+            </tr>
+            <tr>
+                <td><strong>Customer Called</strong></td>
+                <td>{% if call.customer_called %}✅ Yes{% else %}❌ No{% endif %}</td>
+            </tr>
+            <tr>
+                <td><strong>Started At</strong></td>
+                <td>{{ call.started_at|date:"M d, Y H:i:s" }}</td>
+            </tr>
+            <tr>
+                <td><strong>Ended At</strong></td>
+                <td>{{ call.ended_at|date:"M d, Y H:i:s"|default:"—" }}</td>
+            </tr>
+            <tr>
+                <td><strong>Duration</strong></td>
+                <td>{{ call.duration_seconds }} seconds</td>
+            </tr>
+            {% if call.recording_url %}
+            <tr>
+                <td><strong>Recording</strong></td>
+                <td><a href="{{ call.recording_url }}" target="_blank">🎙️ Listen</a></td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

@@ -19,7 +19,7 @@ from django.views import View
 from django.views.decorators.csrf import csrf_protect
 from django.utils.decorators import method_decorator
 
-from bookings.models import Booking, BookingStatus, Payment
+from bookings.models import Booking, BookingStatus, Payment, CallRecord, CallStatus
 from finance.models import LedgerEntry, LedgerAccount, EntryType, OwnerSettlement
 from turfs.models import Turf, TurfStatus
 from users.models import TurfOwner
@@ -500,6 +500,151 @@ class OwnerDetailView(TruffAdminRequiredMixin, View):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# USER MANAGEMENT (customers)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class UserListView(TruffAdminRequiredMixin, View):
+    """List all registered customers with stats."""
+
+    def get(self, request):
+        qs = User.objects.filter(role='user')
+
+        # Search
+        search = request.GET.get('q', '')
+        if search:
+            qs = qs.filter(
+                Q(username__icontains=search) |
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search) |
+                Q(email__icontains=search) |
+                Q(phone_number__icontains=search)
+            )
+
+        # Verified filter
+        verified = request.GET.get('verified', '')
+        if verified == 'yes':
+            qs = qs.filter(is_verified=True)
+        elif verified == 'no':
+            qs = qs.filter(is_verified=False)
+
+        # Date range
+        date_from = request.GET.get('date_from', '')
+        date_to = request.GET.get('date_to', '')
+        if date_from:
+            qs = qs.filter(created_at__date__gte=date_from)
+        if date_to:
+            qs = qs.filter(created_at__date__lte=date_to)
+
+        # Annotate with booking stats
+        qs = qs.annotate(
+            booking_count=Count('bookings', distinct=True),
+            total_spent=Sum(
+                'bookings__final_price',
+                filter=Q(
+                    bookings__booking_status__in=[
+                        BookingStatus.CONFIRMED, BookingStatus.COMPLETED,
+                    ]
+                ),
+            ),
+        )
+
+        # Sorting
+        sort = request.GET.get('sort', '-created_at')
+        allowed_sorts = {
+            'bookings': 'booking_count', '-bookings': '-booking_count',
+            'spent': 'total_spent', '-spent': '-total_spent',
+            'joined': 'created_at', '-joined': '-created_at',
+            'name': 'first_name', '-name': '-first_name',
+        }
+        order = allowed_sorts.get(sort, '-created_at')
+        qs = qs.order_by(order)
+
+        paginator = Paginator(qs, 25)
+        page = paginator.get_page(request.GET.get('page', 1))
+
+        return render(request, 'truff_admin/users_list.html', {
+            'page': page,
+            'search_query': search,
+            'verified_filter': verified,
+            'date_from': date_from,
+            'date_to': date_to,
+            'current_sort': sort,
+            'total_users': User.objects.filter(role='user').count(),
+        })
+
+
+class UserDetailView(TruffAdminRequiredMixin, View):
+    """Single user detail with booking/call history."""
+
+    def get(self, request, user_id):
+        user_obj = get_object_or_404(User, pk=user_id)
+
+        # Booking history
+        bookings = Booking.objects.filter(
+            user=user_obj
+        ).select_related('turf').order_by('-created_at')[:25]
+
+        # Call history (calls where they were the customer)
+        call_records = CallRecord.objects.filter(
+            booking__user=user_obj
+        ).select_related(
+            'booking', 'booking__turf', 'initiated_by'
+        ).order_by('-started_at')[:20]
+
+        # Stats
+        stats = Booking.objects.filter(
+            user=user_obj,
+            booking_status__in=[BookingStatus.CONFIRMED, BookingStatus.COMPLETED],
+        ).aggregate(
+            total_spent=Sum('final_price'),
+            total_bookings=Count('id'),
+        )
+
+        return render(request, 'truff_admin/user_detail.html', {
+            'user_obj': user_obj,
+            'bookings': bookings,
+            'call_records': call_records,
+            'stats': stats,
+        })
+
+
+class ExportUsersView(TruffAdminRequiredMixin, View):
+    """CSV export of all users."""
+
+    def get(self, request):
+        qs = User.objects.filter(role='user').annotate(
+            booking_count=Count('bookings', distinct=True),
+            total_spent=Sum(
+                'bookings__final_price',
+                filter=Q(
+                    bookings__booking_status__in=[
+                        BookingStatus.CONFIRMED, BookingStatus.COMPLETED,
+                    ]
+                ),
+            ),
+        ).order_by('-created_at').iterator()
+
+        header = [
+            'ID', 'Username', 'Name', 'Email', 'Phone',
+            'Verified', 'Bookings', 'Total Spent', 'Joined',
+        ]
+
+        def rows():
+            for u in qs:
+                yield [
+                    u.id, u.username,
+                    u.get_full_name() or u.username,
+                    u.email or '', u.phone_number or '',
+                    'Yes' if u.is_verified else 'No',
+                    u.booking_count, float(u.total_spent or 0),
+                    str(u.created_at),
+                ]
+
+        log_admin_action(request, 'export_users', 'User', 0)
+        return streaming_csv_response('users_export.csv', header, rows())
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # BOOKINGS & TRANSACTIONS
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -882,3 +1027,178 @@ class ExportRevenueView(TruffAdminRequiredMixin, View):
 
         log_admin_action(request, 'export_revenue', 'Booking', 0)
         return streaming_csv_response('revenue_export.csv', header, rows())
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CALL MANAGEMENT
+# ═══════════════════════════════════════════════════════════════════════════
+
+class CallListView(TruffAdminRequiredMixin, View):
+    """Call log listing — admin sees REAL phone numbers."""
+
+    def get(self, request):
+        qs = CallRecord.objects.select_related(
+            'booking', 'booking__user', 'booking__turf', 'initiated_by'
+        ).order_by('-started_at')
+
+        # Filters
+        status_filter = request.GET.get('status', '')
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+
+        date_from = request.GET.get('date_from', '')
+        date_to = request.GET.get('date_to', '')
+        if date_from:
+            qs = qs.filter(started_at__date__gte=date_from)
+        if date_to:
+            qs = qs.filter(started_at__date__lte=date_to)
+
+        owner_filter = request.GET.get('owner', '')
+        if owner_filter:
+            qs = qs.filter(initiated_by__username__icontains=owner_filter)
+
+        search = request.GET.get('q', '')
+        if search:
+            qs = qs.filter(
+                Q(booking__id__icontains=search) |
+                Q(booking__user__username__icontains=search) |
+                Q(booking__user__first_name__icontains=search) |
+                Q(initiated_by__username__icontains=search)
+            )
+
+        # Stats
+        total_calls = qs.count()
+        total_duration = sum(c.duration_seconds for c in qs[:100])
+
+        paginator = Paginator(qs, 25)
+        page = paginator.get_page(request.GET.get('page', 1))
+
+        return render(request, 'truff_admin/call_management.html', {
+            'page': page,
+            'total_calls': total_calls,
+            'total_duration_min': round(total_duration / 60, 1),
+            'status_choices': CallStatus.choices,
+            'current_status': status_filter,
+            'date_from': date_from,
+            'date_to': date_to,
+            'owner_filter': owner_filter,
+            'search_query': search,
+        })
+
+
+class CallDetailView(TruffAdminRequiredMixin, View):
+    """Single call record detail — admin sees full info."""
+
+    def get(self, request, call_id):
+        call = get_object_or_404(
+            CallRecord.objects.select_related(
+                'booking', 'booking__user', 'booking__turf', 'initiated_by'
+            ),
+            pk=call_id,
+        )
+        return render(request, 'truff_admin/call_detail.html', {
+            'call': call,
+        })
+
+
+class CallQueueView(TruffAdminRequiredMixin, View):
+    """Pending calls needing admin attention."""
+
+    def get(self, request):
+        pending = CallRecord.objects.filter(
+            admin_acknowledged=False,
+        ).select_related(
+            'booking', 'booking__user', 'booking__turf', 'initiated_by'
+        ).order_by('-started_at')
+
+        active = CallRecord.objects.filter(
+            status=CallStatus.CONNECTED,
+        ).select_related(
+            'booking', 'booking__user', 'booking__turf', 'initiated_by'
+        ).order_by('-started_at')
+
+        return render(request, 'truff_admin/call_queue.html', {
+            'pending_calls': pending,
+            'active_calls': active,
+        })
+
+
+class PendingCallsJsonView(TruffAdminRequiredMixin, View):
+    """
+    JSON endpoint polled by admin dashboard JS every 10s.
+    Returns unacknowledged calls for badge + toast.
+    GET /truff-admin/calls/pending/json/
+    """
+
+    def get(self, request):
+        pending = CallRecord.objects.filter(
+            admin_acknowledged=False,
+        ).select_related(
+            'booking', 'booking__user', 'booking__turf', 'initiated_by'
+        ).order_by('-started_at')[:20]
+
+        calls = []
+        for c in pending:
+            owner = c.initiated_by
+            customer = c.booking.user
+            calls.append({
+                'id': c.id,
+                'booking_id': c.booking.id,
+                'turf_name': c.booking.turf.name,
+                'owner_name': f'{owner.first_name} {owner.last_name}'.strip() or owner.username,
+                'customer_name': f'{customer.first_name} {customer.last_name}'.strip() or customer.username,
+                'customer_phone': customer.phone_number or '',
+                'status': c.status,
+                'started_at': c.started_at.isoformat(),
+                'admin_notified': c.admin_notified,
+            })
+
+        # Mark as notified (admin has seen them via poll)
+        CallRecord.objects.filter(
+            admin_acknowledged=False, admin_notified=False,
+        ).update(admin_notified=True)
+
+        return JsonResponse({
+            'count': len(calls),
+            'calls': calls,
+        })
+
+
+@method_decorator(csrf_protect, name='dispatch')
+class CallAcknowledgeView(TruffAdminRequiredMixin, View):
+    """Admin acknowledges a pending call. Badge count decreases."""
+
+    def post(self, request, call_id):
+        call = get_object_or_404(CallRecord, pk=call_id)
+        call.admin_acknowledged = True
+        call.admin_acknowledged_at = timezone.now()
+        call.save(update_fields=['admin_acknowledged', 'admin_acknowledged_at'])
+
+        log_admin_action(request, 'call_acknowledge', 'CallRecord', call_id)
+        return JsonResponse({'success': True, 'call_id': call_id})
+
+
+@method_decorator(csrf_protect, name='dispatch')
+class CallConnectView(TruffAdminRequiredMixin, View):
+    """Admin connects the call (marks as connected). Telephony hook point."""
+
+    def post(self, request, call_id):
+        call = get_object_or_404(CallRecord, pk=call_id)
+        call.status = CallStatus.CONNECTED
+        call.admin_acknowledged = True
+        call.admin_acknowledged_at = timezone.now()
+
+        notes = request.POST.get('notes', '')
+        if notes:
+            call.admin_notes = notes
+
+        call.save(update_fields=[
+            'status', 'admin_acknowledged', 'admin_acknowledged_at', 'admin_notes',
+        ])
+
+        log_admin_action(request, 'call_connect', 'CallRecord', call_id)
+
+        # TODO: Telephony hook — call owner, then customer, create conference
+        # This is where Twilio/Exotel integration goes.
+
+        return JsonResponse({'success': True, 'call_id': call_id, 'status': 'connected'})

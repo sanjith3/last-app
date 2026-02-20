@@ -240,3 +240,72 @@ class BookingSlot(models.Model):
 
     def __str__(self):
         return f"Lock: {self.slot_master} on {self.booking_date} → Booking #{self.booking_id}"
+
+
+# ---------------------------------------------------------------------------
+# Call Records — privacy-protected calling system
+# ---------------------------------------------------------------------------
+
+class CallStatus(models.TextChoices):
+    INITIATED = 'initiated', 'Initiated'
+    CONNECTED = 'connected', 'Connected'
+    COMPLETED = 'completed', 'Completed'
+    FAILED = 'failed', 'Failed'
+
+
+class CallRecord(models.Model):
+    """
+    Tracks calls between turf owners and customers.
+    Owner never sees real customer phone — all calls go through admin system.
+    """
+    booking = models.ForeignKey(
+        Booking,
+        on_delete=models.CASCADE,
+        related_name='call_records',
+    )
+    initiated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='initiated_calls',
+        help_text='The turf owner who clicked Call Customer',
+    )
+
+    # Conference / telephony
+    conference_id = models.CharField(
+        max_length=100, unique=True, null=True, blank=True,
+        help_text='Provider conference ID (Twilio/Exotel/etc.)',
+    )
+    owner_called = models.BooleanField(default=False)
+    customer_called = models.BooleanField(default=False)
+
+    # Timing
+    started_at = models.DateTimeField(auto_now_add=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    duration_seconds = models.IntegerField(default=0)
+
+    # Status
+    status = models.CharField(
+        max_length=20,
+        choices=CallStatus.choices,
+        default=CallStatus.INITIATED,
+    )
+
+    # Optional recording
+    recording_url = models.URLField(null=True, blank=True)
+
+    # Admin notification tracking
+    admin_notified = models.BooleanField(default=False)
+    admin_acknowledged = models.BooleanField(default=False)
+    admin_acknowledged_at = models.DateTimeField(null=True, blank=True)
+    admin_notes = models.TextField(blank=True, default='')
+
+    class Meta:
+        ordering = ['-started_at']
+        indexes = [
+            models.Index(fields=['booking', '-started_at']),
+            models.Index(fields=['initiated_by', '-started_at']),
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self):
+        return f"Call #{self.pk} — Booking #{self.booking_id} ({self.status})"

@@ -30,6 +30,10 @@ urlpatterns = [
     path('bookings/', views.BookingListView.as_view(), name='bookings'),
     path('bookings/<int:booking_id>/', views.BookingDetailView.as_view(), name='booking_detail'),
 
+    # Users (customers)
+    path('users/', views.UserListView.as_view(), name='users'),
+    path('users/<int:user_id>/', views.UserDetailView.as_view(), name='user_detail'),
+
     # Revenue
     path('revenue/', views.RevenueView.as_view(), name='revenue'),
 
@@ -47,4 +51,13 @@ urlpatterns = [
     path('export/owners/', views.ExportOwnersView.as_view(), name='export_owners'),
     path('export/turfs/', views.ExportTurfsView.as_view(), name='export_turfs'),
     path('export/revenue/', views.ExportRevenueView.as_view(), name='export_revenue'),
+    path('export/users/', views.ExportUsersView.as_view(), name='export_users'),
+
+    # Call Management
+    path('calls/', views.CallListView.as_view(), name='calls'),
+    path('calls/queue/', views.CallQueueView.as_view(), name='call_queue'),
+    path('calls/pending/json/', views.PendingCallsJsonView.as_view(), name='pending_calls_json'),
+    path('calls/<int:call_id>/', views.CallDetailView.as_view(), name='call_detail_admin'),
+    path('calls/<int:call_id>/acknowledge/', views.CallAcknowledgeView.as_view(), name='call_acknowledge'),
+    path('calls/<int:call_id>/connect/', views.CallConnectView.as_view(), name='call_connect'),
 ]
