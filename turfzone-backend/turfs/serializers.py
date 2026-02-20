@@ -3,10 +3,11 @@ Serializers for turfs app.
 """
 
 from rest_framework import serializers
-from .models import Turf, TurfImage, Sport, Amenity, Review, SlotOffer, OfferType
+from .models import Turf, TurfImage, Sport, Amenity, Review, SlotOffer, OfferType, SlotMaster
 from users.serializers import CustomUserBasicSerializer
 from core.utils import extract_coordinates_from_google_maps_share_link
-from datetime import date
+from django.utils import timezone
+from django.db.models import Count, Sum, Avg, Q
 from decimal import Decimal, ROUND_HALF_UP
 
 
@@ -55,6 +56,7 @@ class TurfListSerializer(serializers.ModelSerializer):
     has_active_offer = serializers.SerializerMethodField()
     max_offer_type = serializers.SerializerMethodField()
     max_offer_value = serializers.SerializerMethodField()
+    stats = serializers.SerializerMethodField()
     
     class Meta:
         model = Turf
@@ -64,6 +66,7 @@ class TurfListSerializer(serializers.ModelSerializer):
             'images', 'cover_image', 'distance', 'status', 'rejection_reason',
             'suspend_reason', 'google_maps_share_link',
             'has_active_offer', 'max_offer_type', 'max_offer_value',
+            'stats',
         ]
     
     def get_cover_image(self, obj):
@@ -80,8 +83,19 @@ class TurfListSerializer(serializers.ModelSerializer):
         return None
 
     def _get_best_offer(self, turf):
-        """Find the active SlotOffer that yields the maximum absolute discount."""
-        today = date.today()
+        """Find the active SlotOffer that yields the maximum absolute discount.
+        Also auto-deactivates any expired offers (valid_until < today).
+        """
+        today = timezone.localdate()
+
+        # Auto-expire: deactivate offers whose valid_until has passed
+        SlotOffer.objects.filter(
+            slot_master__turf=turf,
+            is_active=True,
+            valid_until__lt=today,
+        ).update(is_active=False)
+
+        # Now query only genuinely valid offers
         offers = SlotOffer.objects.filter(
             slot_master__turf=turf,
             is_active=True,
@@ -112,6 +126,43 @@ class TurfListSerializer(serializers.ModelSerializer):
         if offer is None:
             return None
         return str(offer.value)
+
+    def get_stats(self, turf):
+        """Per-turf stats — only computed when context has include_stats=True."""
+        if not self.context.get('include_stats'):
+            return None
+
+        from bookings.models import Booking, BookingStatus
+        today = timezone.localdate()
+
+        confirmed_q = Q(booking_status__in=[
+            BookingStatus.CONFIRMED, BookingStatus.COMPLETED
+        ])
+        base_qs = Booking.objects.filter(turf=turf).filter(confirmed_q)
+
+        agg = base_qs.aggregate(
+            total_bookings=Count('id'),
+            total_revenue=Sum('owner_payout'),
+            today_bookings=Count('id', filter=Q(booking_date=today)),
+            today_revenue=Sum('owner_payout', filter=Q(booking_date=today)),
+        )
+
+        review_agg = Review.objects.filter(turf=turf).aggregate(
+            avg_rating=Avg('rating'),
+        )
+
+        slots_count = SlotMaster.objects.filter(
+            turf=turf, is_active=True
+        ).count()
+
+        return {
+            'total_bookings': agg['total_bookings'] or 0,
+            'today_bookings': agg['today_bookings'] or 0,
+            'today_revenue': str(agg['today_revenue'] or Decimal('0.00')),
+            'total_revenue': str(agg['total_revenue'] or Decimal('0.00')),
+            'slots_count': slots_count,
+            'avg_rating': round(review_agg['avg_rating'] or 0, 1),
+        }
 
 
 class TurfDetailSerializer(TurfListSerializer):

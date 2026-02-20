@@ -14,7 +14,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from .models import Turf, TurfImage, Sport, Amenity, Review, TurfStatus, SlotMaster, SlotOffer, OfferType
-from bookings.models import BookingSlot, BookingStatus
+from bookings.models import Booking, BookingSlot, BookingStatus
 from .serializers import (
     TurfListSerializer,
     TurfDetailSerializer,
@@ -104,7 +104,10 @@ class TurfViewSet(viewsets.ModelViewSet):
             logger = logging.getLogger('turfs')
             logger.info('[OWNER_DASH] user=%s turfs=%d', request.user.pk, queryset.count())
             
-            serializer = self.get_serializer(queryset, many=True)
+            serializer = self.get_serializer(
+                queryset, many=True,
+                context={'request': request, 'include_stats': True},
+            )
             return Response({
                 'success': True,
                 'count': queryset.count(),
@@ -165,7 +168,61 @@ class TurfViewSet(viewsets.ModelViewSet):
             'count': len(turfs_data),
             'results': serializer.data
         }, status=status.HTTP_200_OK)
-    
+
+    # ─── OWNER DASHBOARD AGGREGATE STATS ─────────────────────────────────
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated],
+            url_path='owner_dashboard_stats')
+    def owner_dashboard_stats(self, request):
+        """
+        Aggregated stats across all of the owner's turfs.
+        GET /api/turfs/turfs/owner_dashboard_stats/
+        """
+        from django.db.models import Count, Sum, Avg, Q
+
+        user = request.user
+        today = timezone.localdate()
+
+        owner_turfs = Turf.objects.filter(owner=user)
+        total_turfs = owner_turfs.count()
+
+        if total_turfs == 0:
+            return Response({
+                'success': True,
+                'total_turfs': 0,
+                'total_bookings': 0,
+                'today_bookings': 0,
+                'today_revenue': '0.00',
+                'total_revenue': '0.00',
+                'avg_rating': 0,
+            })
+
+        confirmed_q = Q(booking_status__in=[
+            BookingStatus.CONFIRMED, BookingStatus.COMPLETED,
+        ])
+
+        agg = Booking.objects.filter(
+            turf__owner=user,
+        ).filter(confirmed_q).aggregate(
+            total_bookings=Count('id'),
+            total_revenue=Sum('owner_payout'),
+            today_bookings=Count('id', filter=Q(booking_date=today)),
+            today_revenue=Sum('owner_payout', filter=Q(booking_date=today)),
+        )
+
+        review_agg = Review.objects.filter(
+            turf__owner=user,
+        ).aggregate(avg_rating=Avg('rating'))
+
+        return Response({
+            'success': True,
+            'total_turfs': total_turfs,
+            'total_bookings': agg['total_bookings'] or 0,
+            'today_bookings': agg['today_bookings'] or 0,
+            'today_revenue': str(agg['today_revenue'] or 0),
+            'total_revenue': str(agg['total_revenue'] or 0),
+            'avg_rating': round(review_agg['avg_rating'] or 0, 1),
+        })
+
     def retrieve(self, request, *args, **kwargs):
         """
         Get turf details with distance calculation if user location provided.
