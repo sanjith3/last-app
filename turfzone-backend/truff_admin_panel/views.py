@@ -105,29 +105,35 @@ class DashboardView(TruffAdminRequiredMixin, View):
                 booking_status__in=[BookingStatus.CONFIRMED, BookingStatus.COMPLETED]
             )
 
-            # All-time aggregates
+            # All-time aggregates — use platform_revenue as single source of truth
             totals = confirmed_bookings.aggregate(
+                revenue=Sum('platform_revenue'),
                 user_fees=Sum('platform_fee'),
+                gst_on_pf=Sum('gst_on_platform_fee'),
                 owner_commission=Sum('commission'),
+                gst_on_commission=Sum('gst_on_commission'),
             )
-            total_user_fees = totals['user_fees'] or Decimal('0')
-            total_owner_commission = totals['owner_commission'] or Decimal('0')
-            total_revenue = total_user_fees + total_owner_commission
+            total_platform_revenue = totals['revenue'] or Decimal('0')
+            total_user_fees = (totals['user_fees'] or Decimal('0')) + (totals['gst_on_pf'] or Decimal('0'))
+            total_owner_commission = (totals['owner_commission'] or Decimal('0')) + (totals['gst_on_commission'] or Decimal('0'))
 
             # Today aggregates
             today_totals = confirmed_bookings.filter(
                 booking_date=today
             ).aggregate(
+                revenue=Sum('platform_revenue'),
                 user_fees=Sum('platform_fee'),
+                gst_on_pf=Sum('gst_on_platform_fee'),
                 owner_commission=Sum('commission'),
+                gst_on_commission=Sum('gst_on_commission'),
             )
-            today_user_fees = today_totals['user_fees'] or Decimal('0')
-            today_owner_commission = today_totals['owner_commission'] or Decimal('0')
-            today_revenue = today_user_fees + today_owner_commission
+            today_platform_revenue = today_totals['revenue'] or Decimal('0')
+            today_user_fees = (today_totals['user_fees'] or Decimal('0')) + (today_totals['gst_on_pf'] or Decimal('0'))
+            today_owner_commission = (today_totals['owner_commission'] or Decimal('0')) + (today_totals['gst_on_commission'] or Decimal('0'))
 
         except Exception:
-            total_revenue = Decimal('0')
-            today_revenue = Decimal('0')
+            total_platform_revenue = Decimal('0')
+            today_platform_revenue = Decimal('0')
             total_user_fees = Decimal('0')
             total_owner_commission = Decimal('0')
             today_user_fees = Decimal('0')
@@ -135,8 +141,8 @@ class DashboardView(TruffAdminRequiredMixin, View):
             confirmed_bookings = Booking.objects.none()
 
         return {
-            'total_revenue': total_revenue,
-            'today_revenue': today_revenue,
+            'total_revenue': total_platform_revenue,
+            'today_revenue': today_platform_revenue,
             'total_user_fees': total_user_fees,
             'total_owner_commission': total_owner_commission,
             'today_user_fees': today_user_fees,
@@ -165,7 +171,7 @@ class DashboardView(TruffAdminRequiredMixin, View):
                     )
                     .extra(select={'month_str': "strftime('%%Y-%%m', booking_date)"})
                     .values('month_str')
-                    .annotate(total=Sum(F('platform_fee') + F('commission')))
+                    .annotate(total=Sum('platform_revenue'))
                     .order_by('month_str')
                 )
                 return [
@@ -181,7 +187,7 @@ class DashboardView(TruffAdminRequiredMixin, View):
                     )
                     .annotate(month=TruncMonth('booking_date'))
                     .values('month')
-                    .annotate(total=Sum(F('platform_fee') + F('commission')))
+                    .annotate(total=Sum('platform_revenue'))
                     .order_by('month')
                 )
                 return [
@@ -207,7 +213,7 @@ class DashboardView(TruffAdminRequiredMixin, View):
                     )
                     .extra(select={'day_str': "strftime('%%Y-%%m-%%d', booking_date)"})
                     .values('day_str')
-                    .annotate(total=Sum(F('platform_fee') + F('commission')))
+                    .annotate(total=Sum('platform_revenue'))
                     .order_by('day_str')
                 )
                 return [
@@ -223,7 +229,7 @@ class DashboardView(TruffAdminRequiredMixin, View):
                     )
                     .annotate(day=TruncDate('booking_date'))
                     .values('day')
-                    .annotate(total=Sum(F('platform_fee') + F('commission')))
+                    .annotate(total=Sum('platform_revenue'))
                     .order_by('day')
                 )
                 return [
@@ -518,8 +524,21 @@ class OwnerDetailView(TruffAdminRequiredMixin, View):
             total_revenue=Sum('final_price'),
             total_bookings=Count('id'),
             total_platform_fee=Sum('platform_fee'),
+            total_gst_on_platform_fee=Sum('gst_on_platform_fee'),
+            total_commission=Sum('commission'),
+            total_gst_on_commission=Sum('gst_on_commission'),
+            total_platform_revenue=Sum('platform_revenue'),
             total_owner_payout=Sum('owner_payout'),
         )
+
+        # Compute combined card values (fees incl GST, commission incl GST)
+        from decimal import Decimal
+        pf = (stats['total_platform_fee'] or Decimal('0'))
+        gst_pf = (stats['total_gst_on_platform_fee'] or Decimal('0'))
+        comm = (stats['total_commission'] or Decimal('0'))
+        gst_comm = (stats['total_gst_on_commission'] or Decimal('0'))
+        stats['platform_fees_incl_gst'] = pf + gst_pf
+        stats['commission_incl_gst'] = comm + gst_comm
 
         return render(request, 'truff_admin/owner_detail.html', {
             'owner': owner,
@@ -594,6 +613,17 @@ class UserListView(TruffAdminRequiredMixin, View):
         paginator = Paginator(qs, 25)
         page = paginator.get_page(request.GET.get('page', 1))
 
+        # Summary stats
+        all_users = User.objects.filter(role='user')
+        total = all_users.count()
+        verified_count = all_users.filter(is_verified=True).count()
+        summary = {
+            'total': total,
+            'verified': verified_count,
+            'unverified': total - verified_count,
+            'turf_owners': User.objects.filter(role='turf_owner').count(),
+        }
+
         return render(request, 'truff_admin/users_list.html', {
             'page': page,
             'search_query': search,
@@ -601,7 +631,8 @@ class UserListView(TruffAdminRequiredMixin, View):
             'date_from': date_from,
             'date_to': date_to,
             'current_sort': sort,
-            'total_users': User.objects.filter(role='user').count(),
+            'total_users': total,
+            'summary': summary,
         })
 
 
@@ -624,13 +655,19 @@ class UserDetailView(TruffAdminRequiredMixin, View):
         ).order_by('-started_at')[:20]
 
         # Stats
-        stats = Booking.objects.filter(
-            user=user_obj,
+        all_bookings = Booking.objects.filter(user=user_obj)
+        confirmed = all_bookings.filter(
             booking_status__in=[BookingStatus.CONFIRMED, BookingStatus.COMPLETED],
-        ).aggregate(
+        )
+        stats = confirmed.aggregate(
             total_spent=Sum('final_price'),
             total_bookings=Count('id'),
         )
+        stats['cancelled'] = all_bookings.filter(
+            booking_status=BookingStatus.CANCELLED
+        ).count()
+        stats['total_all'] = all_bookings.count()
+        stats['total_calls'] = call_records.count()
 
         return render(request, 'truff_admin/user_detail.html', {
             'user_obj': user_obj,
@@ -708,6 +745,14 @@ class BookingListView(TruffAdminRequiredMixin, View):
         paginator = Paginator(qs.order_by('-created_at'), 25)
         page = paginator.get_page(request.GET.get('page', 1))
 
+        # Summary aggregates for filtered results
+        summary = qs.aggregate(
+            total_revenue=Sum('final_price'),
+            total_payout=Sum('owner_payout'),
+            total_platform_revenue=Sum('platform_revenue'),
+            total_count=Count('id'),
+        )
+
         return render(request, 'truff_admin/bookings_list.html', {
             'page': page,
             'search_query': search,
@@ -715,6 +760,7 @@ class BookingListView(TruffAdminRequiredMixin, View):
             'date_from': date_from or '',
             'date_to': date_to or '',
             'status_choices': BookingStatus.choices,
+            'summary': summary,
         })
 
 
@@ -748,23 +794,60 @@ class RevenueView(TruffAdminRequiredMixin, View):
     """Revenue analytics page."""
 
     def get(self, request):
-        confirmed = Booking.objects.filter(
-            booking_status__in=[BookingStatus.CONFIRMED, BookingStatus.COMPLETED]
-        )
-
-        totals = confirmed.aggregate(
-            total_gross=Sum('final_price'),
-            total_platform_fee=Sum('platform_fee'),
-            total_commission=Sum('commission'),
-            total_gst=Sum('gst_amount'),
-            total_owner_payout=Sum('owner_payout'),
-            booking_count=Count('id'),
-        )
-
-        # Monthly breakdown — SQLite-safe
+        from decimal import Decimal
         from django.db import connection
         is_sqlite = 'sqlite' in connection.vendor
 
+        confirmed = Booking.objects.filter(
+            booking_status__in=[BookingStatus.CONFIRMED, BookingStatus.COMPLETED]
+        )
+        all_bookings = Booking.objects.all()
+
+        # ── Core totals ──
+        totals = confirmed.aggregate(
+            total_gross=Sum('final_price'),
+            total_platform_fee=Sum('platform_fee'),
+            total_gst_on_pf=Sum('gst_on_platform_fee'),
+            total_commission=Sum('commission'),
+            total_gst_on_commission=Sum('gst_on_commission'),
+            total_gst_slots=Sum('gst_amount'),
+            total_owner_payout=Sum('owner_payout'),
+            total_platform_revenue=Sum('platform_revenue'),
+            booking_count=Count('id'),
+        )
+
+        # ── Derived KPIs ──
+        bc = totals['booking_count'] or 0
+        gross = totals['total_gross'] or Decimal('0')
+        totals['avg_booking_value'] = (gross / bc).quantize(Decimal('0.01')) if bc else Decimal('0')
+
+        total_all = all_bookings.count()
+        cancelled = all_bookings.filter(booking_status=BookingStatus.CANCELLED).count()
+        totals['cancellation_rate'] = round(cancelled * 100 / total_all, 1) if total_all else 0
+        totals['cancelled_count'] = cancelled
+
+        gst_slots = totals['total_gst_slots'] or Decimal('0')
+        gst_pf = totals['total_gst_on_pf'] or Decimal('0')
+        gst_comm = totals['total_gst_on_commission'] or Decimal('0')
+        totals['total_gst_all'] = gst_slots + gst_pf + gst_comm
+        gst_total = totals['total_gst_all'] or Decimal('1')
+        totals['gst_slots_pct'] = round(gst_slots * 100 / gst_total, 1) if gst_total else 0
+        totals['gst_pf_pct'] = round(gst_pf * 100 / gst_total, 1) if gst_total else 0
+        totals['gst_comm_pct'] = round(gst_comm * 100 / gst_total, 1) if gst_total else 0
+
+        # ── Top 5 Turfs by revenue ──
+        top_turfs = list(
+            confirmed
+            .values('turf__id', 'turf__name', 'turf__owner__username')
+            .annotate(
+                bookings=Count('id'),
+                revenue=Sum('final_price'),
+                platform_earned=Sum('platform_revenue'),
+            )
+            .order_by('-revenue')[:5]
+        )
+
+        # ── Monthly breakdown — SQLite-safe ──
         if is_sqlite:
             monthly = list(
                 confirmed
@@ -774,7 +857,9 @@ class RevenueView(TruffAdminRequiredMixin, View):
                     gross=Sum('final_price'),
                     platform_fee=Sum('platform_fee'),
                     commission=Sum('commission'),
+                    gst=Sum('gst_amount'),
                     owner_payout=Sum('owner_payout'),
+                    platform_revenue=Sum('platform_revenue'),
                     count=Count('id'),
                 )
                 .order_by('-month')[:12]
@@ -788,7 +873,9 @@ class RevenueView(TruffAdminRequiredMixin, View):
                     gross=Sum('final_price'),
                     platform_fee=Sum('platform_fee'),
                     commission=Sum('commission'),
+                    gst=Sum('gst_amount'),
                     owner_payout=Sum('owner_payout'),
+                    platform_revenue=Sum('platform_revenue'),
                     count=Count('id'),
                 )
                 .order_by('-month')[:12]
@@ -797,6 +884,7 @@ class RevenueView(TruffAdminRequiredMixin, View):
         return render(request, 'truff_admin/revenue.html', {
             'totals': totals,
             'monthly': monthly,
+            'top_turfs': top_turfs,
         })
 
 
@@ -868,24 +956,52 @@ class AuditLogView(TruffAdminRequiredMixin, View):
             qs = qs.filter(
                 Q(actor_name__icontains=search) |
                 Q(action__icontains=search) |
-                Q(target_model__icontains=search)
+                Q(target_model__icontains=search) |
+                Q(ip_address__icontains=search)
             )
 
         action_filter = request.GET.get('action')
         if action_filter:
             qs = qs.filter(action=action_filter)
 
-        paginator = Paginator(qs, 25)
+        model_filter = request.GET.get('model')
+        if model_filter:
+            qs = qs.filter(target_model=model_filter)
+
+        date_from = request.GET.get('date_from')
+        if date_from:
+            qs = qs.filter(created_at__date__gte=date_from)
+        date_to = request.GET.get('date_to')
+        if date_to:
+            qs = qs.filter(created_at__date__lte=date_to)
+
+        paginator = Paginator(qs, 50)
         page = paginator.get_page(request.GET.get('page', 1))
 
-        # Distinct actions for dropdown
+        # Distinct actions and models for dropdowns
         actions = AdminAuditLog.objects.values_list('action', flat=True).distinct().order_by('action')
+        models_list = AdminAuditLog.objects.values_list('target_model', flat=True).distinct().order_by('target_model')
+
+        # Summary stats
+        all_logs = AdminAuditLog.objects.all()
+        today = timezone.localdate()
+        summary = {
+            'total': all_logs.count(),
+            'today': all_logs.filter(created_at__date=today).count(),
+            'actors': all_logs.values('actor_name').distinct().count(),
+            'filtered': qs.count(),
+        }
 
         return render(request, 'truff_admin/audit_log.html', {
             'page': page,
             'search_query': search,
             'current_action': action_filter or '',
+            'current_model': model_filter or '',
+            'date_from': date_from or '',
+            'date_to': date_to or '',
             'actions': actions,
+            'models_list': models_list,
+            'summary': summary,
         })
 
 
@@ -897,13 +1013,18 @@ class SettingsView(TruffAdminRequiredMixin, View):
     """Admin settings: config values + admin user management."""
 
     def get(self, request):
-        configs = AdminConfig.objects.all().order_by('key')
+        import django
+        from django.db import connection
 
         # Ensure defaults exist
         defaults = {
             'platform_fee_percent': ('5', 'Platform convenience fee percentage'),
-            'flat_transaction_fee': ('10', 'Flat fee per transaction (₹)'),
+            'flat_transaction_fee': ('10', 'Flat fee per transaction (INR)'),
             'export_row_limit': ('10000', 'Max rows in CSV export'),
+            'gst_rate': ('18', 'GST rate percentage'),
+            'booking_buffer_mins': ('30', 'Minutes before slot to block booking'),
+            'max_advance_days': ('30', 'Max days in advance users can book'),
+            'min_cancel_hours': ('4', 'Hours before slot for free cancellation'),
         }
         for key, (val, desc) in defaults.items():
             AdminConfig.objects.get_or_create(
@@ -914,11 +1035,29 @@ class SettingsView(TruffAdminRequiredMixin, View):
         configs = AdminConfig.objects.all().order_by('key')
         admin_users = User.objects.filter(
             Q(is_staff=True) | Q(groups__name='Truff Admin')
-        ).distinct()
+        ).distinct().select_related().prefetch_related('groups')
+
+        # Recent settings changes from audit log
+        recent_changes = AdminAuditLog.objects.filter(
+            action='config_updated',
+        ).order_by('-created_at')[:10]
+
+        # System info
+        sys_info = {
+            'django_version': django.get_version(),
+            'python_version': f'{__import__("sys").version_info.major}.{__import__("sys").version_info.minor}.{__import__("sys").version_info.micro}',
+            'db_engine': connection.vendor,
+            'timezone': str(__import__("django.conf", fromlist=["settings"]).settings.TIME_ZONE),
+            'debug': __import__("django.conf", fromlist=["settings"]).settings.DEBUG,
+            'total_users': User.objects.count(),
+            'total_bookings': Booking.objects.count(),
+        }
 
         return render(request, 'truff_admin/settings.html', {
             'configs': configs,
             'admin_users': admin_users,
+            'recent_changes': recent_changes,
+            'sys_info': sys_info,
         })
 
     def post(self, request):

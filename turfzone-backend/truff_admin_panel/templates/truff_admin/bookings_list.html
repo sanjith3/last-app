@@ -7,7 +7,7 @@
 <div class="topbar">
     <h1>Bookings</h1>
     <div class="topbar-actions">
-        <a href="/truff-admin/export/bookings/" class="btn btn-outline btn-sm">📥 Export CSV</a>
+        <a href="/truff-admin/export/bookings/" class="btn btn-outline btn-sm">&#128229; Export CSV</a>
     </div>
 </div>
 
@@ -28,45 +28,75 @@
     </form>
 </div>
 
+<!-- Summary Bar -->
+<div
+    style="display:flex;gap:24px;flex-wrap:wrap;padding:12px 16px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);border-radius:8px;margin-bottom:16px;font-size:13px;">
+    <span><b>{{ summary.total_count|default:0 }}</b> bookings</span>
+    <span>Total Revenue: <b>{{ summary.total_revenue|currency }}</b></span>
+    <span>Owner Payout: <b>{{ summary.total_payout|currency }}</b></span>
+    <span>Platform Earned: <b>{{ summary.total_platform_revenue|currency }}</b></span>
+</div>
+
 <div class="panel">
-    <table class="data-table">
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>User</th>
-                <th>Turf</th>
-                <th>Date</th>
-                <th>Time</th>
-                <th>Status</th>
-                <th>Amount</th>
-                <th>Payout</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for b in page %}
-            <tr>
-                <td><a href="/truff-admin/bookings/{{ b.id }}/">{{ b.id }}</a></td>
-                <td>{{ b.user.username }}</td>
-                <td>{{ b.turf.name }}</td>
-                <td>{{ b.booking_date }}</td>
-                <td>{{ b.start_time|time:"H:i" }} – {{ b.end_time|time:"H:i" }}</td>
-                <td><span class="badge {{ b.booking_status|status_badge }}">{{ b.booking_status }}</span></td>
-                <td>₹{{ b.final_price }}</td>
-                <td>₹{{ b.owner_payout }}</td>
-            </tr>
-            {% empty %}
-            <tr>
-                <td colspan="8" style="text-align:center;color:var(--text-muted);">No bookings found</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div style="overflow-x:auto;">
+        <table class="data-table" style="min-width:1200px;">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Customer</th>
+                    <th>Owner</th>
+                    <th>Turf</th>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>Status</th>
+                    <th title="Base slot price after discount">Subtotal</th>
+                    <th title="18% GST on slots">GST</th>
+                    <th title="Fixed fee per booking">PF</th>
+                    <th title="18% GST on platform fee">GST PF</th>
+                    <th title="5% of subtotal">Comm</th>
+                    <th title="18% GST on commission">GST Comm</th>
+                    <th title="Total paid by customer">Total</th>
+                    <th title="Amount owner receives">Payout</th>
+                    <th title="Platform earnings">Plat Rev</th>
+                    <th>Created</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for b in page %}
+                <tr>
+                    <td><a href="/truff-admin/bookings/{{ b.id }}/">{{ b.id }}</a></td>
+                    <td style="white-space:nowrap;">{{ b.user.get_full_name|default:b.user.username }}<br><span
+                            style="font-size:11px;color:#8b8fa3;">{{ b.user.phone_number|default:"" }}</span></td>
+                    <td>{{ b.turf.owner.username }}</td>
+                    <td>{{ b.turf.name }}</td>
+                    <td style="white-space:nowrap;">{{ b.booking_date|date:"d M Y" }}</td>
+                    <td style="white-space:nowrap;">{{ b.start_time|time:"H:i" }} - {{ b.end_time|time:"H:i" }}</td>
+                    <td><span class="badge {{ b.booking_status|status_badge }}">{{ b.booking_status }}</span></td>
+                    <td style="text-align:right;">{{ b.total_price|currency }}</td>
+                    <td style="text-align:right;">{{ b.gst_amount|currency }}</td>
+                    <td style="text-align:right;">{{ b.platform_fee|currency }}</td>
+                    <td style="text-align:right;">{{ b.gst_on_platform_fee|currency }}</td>
+                    <td style="text-align:right;">{{ b.commission|currency }}</td>
+                    <td style="text-align:right;">{{ b.gst_on_commission|currency }}</td>
+                    <td style="text-align:right;font-weight:600;">{{ b.final_price|currency }}</td>
+                    <td style="text-align:right;color:#22c55e;">{{ b.owner_payout|currency }}</td>
+                    <td style="text-align:right;color:#3b82f6;">{{ b.platform_revenue|currency }}</td>
+                    <td style="white-space:nowrap;font-size:11px;color:#8b8fa3;">{{ b.created_at|date:"d M H:i" }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="17" style="text-align:center;color:#8b8fa3;">No bookings found</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 
     {% if page.has_other_pages %}
     <div class="pagination">
         {% if page.has_previous %}
         <a
-            href="?page={{ page.previous_page_number }}&q={{ search_query }}&status={{ current_status }}&date_from={{ date_from }}&date_to={{ date_to }}">←
+            href="?page={{ page.previous_page_number }}&q={{ search_query }}&status={{ current_status }}&date_from={{ date_from }}&date_to={{ date_to }}">&#8592;
             Prev</a>
         {% endif %}
         {% for num in page.paginator.page_range %}
@@ -80,7 +110,7 @@
             {% if page.has_next %}
             <a
                 href="?page={{ page.next_page_number }}&q={{ search_query }}&status={{ current_status }}&date_from={{ date_from }}&date_to={{ date_to }}">Next
-                →</a>
+                &#8594;</a>
             {% endif %}
     </div>
     {% endif %}

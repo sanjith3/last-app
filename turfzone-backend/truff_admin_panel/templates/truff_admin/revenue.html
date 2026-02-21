@@ -1,33 +1,47 @@
 {% extends "truff_admin/base.html" %}
 {% load truff_tags %}
 
-{% block title %}Revenue — Truff-Admin{% endblock %}
+{% block title %}Revenue &#8212; Truff-Admin{% endblock %}
 
 {% block content %}
 <div class="topbar">
     <h1>Revenue Analytics</h1>
     <div class="topbar-actions">
-        <a href="/truff-admin/export/revenue/" class="btn btn-outline btn-sm">📥 Export CSV</a>
+        <a href="/truff-admin/export/revenue/" class="btn btn-outline btn-sm">&#128229; Export CSV</a>
     </div>
 </div>
 
-<!-- Summary KPIs -->
+<!-- Row 1: High-Level KPIs -->
 <div class="kpi-grid">
     <div class="kpi-card accent">
         <div class="kpi-label">Gross Revenue</div>
         <div class="kpi-value">{{ totals.total_gross|currency }}</div>
     </div>
     <div class="kpi-card accent">
-        <div class="kpi-label">Platform Fee</div>
+        <div class="kpi-label">Net Platform Revenue</div>
+        <div class="kpi-value">{{ totals.total_platform_revenue|currency }}</div>
+        <div style="font-size:11px;color:#8b8fa3;margin-top:4px;">Fees + Commission (incl. GST)</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Avg Booking Value</div>
+        <div class="kpi-value">{{ totals.avg_booking_value|currency }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Cancellation Rate</div>
+        <div class="kpi-value">{{ totals.cancellation_rate }}%</div>
+        <div style="font-size:11px;color:#8b8fa3;margin-top:4px;">{{ totals.cancelled_count }} of {{ totals.booking_count|default:0 }} bookings</div>
+    </div>
+</div>
+
+<!-- Row 2: Financial Breakdown -->
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-label">Platform Fees</div>
         <div class="kpi-value">{{ totals.total_platform_fee|currency }}</div>
     </div>
     <div class="kpi-card">
-        <div class="kpi-label">Commission</div>
+        <div class="kpi-label">Commission (5%)</div>
         <div class="kpi-value">{{ totals.total_commission|currency }}</div>
-    </div>
-    <div class="kpi-card">
-        <div class="kpi-label">GST Collected</div>
-        <div class="kpi-value">{{ totals.total_gst|currency }}</div>
     </div>
     <div class="kpi-card">
         <div class="kpi-label">Owner Payouts</div>
@@ -39,36 +53,94 @@
     </div>
 </div>
 
-<!-- Monthly Breakdown Table -->
+<!-- GST Breakdown Panel -->
 <div class="panel">
-    <div class="panel-title">Monthly Revenue Breakdown</div>
+    <div class="panel-title">GST Breakdown</div>
+    <div style="display:flex;gap:24px;flex-wrap:wrap;padding:8px 0;">
+        <div>
+            <div style="font-size:13px;color:#8b8fa3;">Total GST Collected</div>
+            <div style="font-size:20px;font-weight:700;">{{ totals.total_gst_all|currency }}</div>
+        </div>
+        <div style="border-left:1px solid rgba(255,255,255,0.1);padding-left:24px;">
+            <div style="font-size:13px;color:#8b8fa3;">GST on Slots ({{ totals.gst_slots_pct }}%)</div>
+            <div style="font-size:16px;font-weight:600;">{{ totals.total_gst_slots|currency }}</div>
+        </div>
+        <div style="border-left:1px solid rgba(255,255,255,0.1);padding-left:24px;">
+            <div style="font-size:13px;color:#8b8fa3;">GST on Platform Fee ({{ totals.gst_pf_pct }}%)</div>
+            <div style="font-size:16px;font-weight:600;">{{ totals.total_gst_on_pf|currency }}</div>
+        </div>
+        <div style="border-left:1px solid rgba(255,255,255,0.1);padding-left:24px;">
+            <div style="font-size:13px;color:#8b8fa3;">GST on Commission ({{ totals.gst_comm_pct }}%)</div>
+            <div style="font-size:16px;font-weight:600;">{{ totals.total_gst_on_commission|currency }}</div>
+        </div>
+    </div>
+</div>
+
+<!-- Top Performing Turfs -->
+{% if top_turfs %}
+<div class="panel">
+    <div class="panel-title">Top Performing Turfs</div>
     <table class="data-table">
         <thead>
             <tr>
-                <th>Month</th>
-                <th>Gross</th>
-                <th>Platform Fee</th>
-                <th>Commission</th>
-                <th>Owner Payout</th>
-                <th>Bookings</th>
+                <th>Turf</th>
+                <th>Owner</th>
+                <th style="text-align:right;">Bookings</th>
+                <th style="text-align:right;">Revenue</th>
+                <th style="text-align:right;">Platform Earnings</th>
             </tr>
         </thead>
         <tbody>
-            {% for m in monthly %}
+            {% for t in top_turfs %}
             <tr>
-                <td>{{ m.month|date:"M Y" }}</td>
-                <td>₹{{ m.gross|floatformat:2|default:"0.00" }}</td>
-                <td>₹{{ m.platform_fee|floatformat:2|default:"0.00" }}</td>
-                <td>₹{{ m.commission|floatformat:2|default:"0.00" }}</td>
-                <td>₹{{ m.owner_payout|floatformat:2|default:"0.00" }}</td>
-                <td>{{ m.count }}</td>
-            </tr>
-            {% empty %}
-            <tr>
-                <td colspan="6" style="text-align:center;color:var(--text-muted);">No revenue data yet</td>
+                <td><a href="/truff-admin/turfs/{{ t.turf__id }}/">{{ t.turf__name }}</a></td>
+                <td>{{ t.turf__owner__username }}</td>
+                <td style="text-align:right;">{{ t.bookings }}</td>
+                <td style="text-align:right;">{{ t.revenue|currency }}</td>
+                <td style="text-align:right;color:#3b82f6;">{{ t.platform_earned|currency }}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+</div>
+{% endif %}
+
+<!-- Monthly Revenue Breakdown -->
+<div class="panel">
+    <div class="panel-title">Monthly Revenue Breakdown</div>
+    <div style="overflow-x:auto;">
+        <table class="data-table" style="min-width:900px;">
+            <thead>
+                <tr>
+                    <th>Month</th>
+                    <th style="text-align:right;">Gross</th>
+                    <th style="text-align:right;">Platform Fee</th>
+                    <th style="text-align:right;">Commission</th>
+                    <th style="text-align:right;">GST</th>
+                    <th style="text-align:right;">Owner Payout</th>
+                    <th style="text-align:right;">Bookings</th>
+                    <th style="text-align:right;">Platform Rev</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in monthly %}
+                <tr>
+                    <td>{{ m.month|date:"M Y" }}</td>
+                    <td style="text-align:right;">{{ m.gross|currency }}</td>
+                    <td style="text-align:right;">{{ m.platform_fee|currency }}</td>
+                    <td style="text-align:right;">{{ m.commission|currency }}</td>
+                    <td style="text-align:right;">{{ m.gst|currency }}</td>
+                    <td style="text-align:right;">{{ m.owner_payout|currency }}</td>
+                    <td style="text-align:right;">{{ m.count }}</td>
+                    <td style="text-align:right;color:#3b82f6;font-weight:600;">{{ m.platform_revenue|currency }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="8" style="text-align:center;color:#8b8fa3;">No revenue data yet</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 </div>
 {% endblock %}

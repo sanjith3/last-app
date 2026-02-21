@@ -1,13 +1,13 @@
 {% extends "truff_admin/base.html" %}
 {% load truff_tags %}
 
-{% block title %}{{ user_obj.username }} — User Detail{% endblock %}
+{% block title %}{{ user_obj.username }} &#8212; User Detail{% endblock %}
 
 {% block content %}
 <div class="topbar">
-    <h1>👤 {{ user_obj.get_full_name|default:user_obj.username }}</h1>
+    <h1>{{ user_obj.get_full_name|default:user_obj.username }}</h1>
     <div class="topbar-actions">
-        <a href="/truff-admin/users/" class="btn btn-outline btn-sm">← Back to Users</a>
+        <a href="/truff-admin/users/" class="btn btn-outline btn-sm">&#8592; Back to Users</a>
     </div>
 </div>
 
@@ -18,8 +18,16 @@
         <div class="kpi-value">{{ stats.total_spent|currency }}</div>
     </div>
     <div class="kpi-card">
-        <div class="kpi-label">Total Bookings</div>
+        <div class="kpi-label">Confirmed Bookings</div>
         <div class="kpi-value">{{ stats.total_bookings|default:0 }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Cancelled</div>
+        <div class="kpi-value" style="color:#ef4444;">{{ stats.cancelled|default:0 }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Total Calls</div>
+        <div class="kpi-value">{{ stats.total_calls|default:0 }}</div>
     </div>
     <div class="kpi-card">
         <div class="kpi-label">Credits Available</div>
@@ -27,7 +35,8 @@
     </div>
     <div class="kpi-card">
         <div class="kpi-label">Account Status</div>
-        <div class="kpi-value">{% if user_obj.is_verified %}✅ Verified{% else %}❌ Unverified{% endif %}</div>
+        <div class="kpi-value" style="font-size:14px;">{% if user_obj.is_verified   %}&#9989; Verified{% else %}&#10060;
+            Unverified{% endif %}</div>
     </div>
 </div>
 
@@ -36,86 +45,89 @@
     <div class="panel-title">Personal Details</div>
     <div class="detail-grid">
         <div class="detail-item"><label>Username</label><span>{{ user_obj.username }}</span></div>
-        <div class="detail-item"><label>Email</label><span>{{ user_obj.email|default:"—" }}</span></div>
-        <div class="detail-item"><label>Phone</label><span><strong>{{ user_obj.phone_number|default:"—" }}</strong></span></div>
-        <div class="detail-item"><label>Role</label><span>{{ user_obj.get_role_display }}</span></div>
+        <div class="detail-item"><label>Email</label><span>{{ user_obj.email|default:"--" }}</span></div>
+        <div class="detail-item"><label>Phone</label><span><strong>{{ user_obj.phone_number|default:"--" }}</strong></span></div>
+        <div class="detail-item"><label>Role</label><span><span class="badge badge-secondary">{{ user_obj.get_role_display }}</span></span></div>
         <div class="detail-item"><label>Verified</label><span>{{ user_obj.is_verified|yesno:"Yes,No" }}</span></div>
+        <div class="detail-item"><label>Active</label><span>{{ user_obj.is_active|yesno:"Yes,No" }}</span></div>
         <div class="detail-item"><label>Joined</label><span>{{ user_obj.created_at|date:"d M Y H:i" }}</span></div>
         <div class="detail-item"><label>Last Login</label><span>{{ user_obj.last_login|date:"d M Y H:i"|default:"Never" }}</span></div>
         <div class="detail-item"><label>Total Credits</label><span>{{ user_obj.total_credits }} (used: {{ user_obj.used_credits }})</span></div>
+        <div class="detail-item"><label>All Bookings</label><span>{{ stats.total_all|default:0 }}</span></div>
     </div>
 </div>
 
 <!-- Booking History -->
 <div class="panel">
     <div class="panel-title">Booking History (last 25)</div>
-    <table class="data-table">
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Turf</th>
-                <th>Date</th>
-                <th>Time</th>
-                <th>Status</th>
-                <th>Amount</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for b in bookings %}
-            <tr>
-                <td><a href="/truff-admin/bookings/{{ b.id }}/">{{ b.id }}</a></td>
-                <td>{{ b.turf.name }}</td>
-                <td>{{ b.booking_date }}</td>
-                <td>{{ b.start_time|time:"H:i" }} – {{ b.end_time|time:"H:i" }}</td>
-                <td><span class="badge {{ b.booking_status|status_badge }}">{{ b.booking_status }}</span></td>
-                <td>₹{{ b.final_price }}</td>
-            </tr>
-            {% empty %}
-            <tr>
-                <td colspan="6" style="text-align:center;color:var(--text-muted);">No bookings</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div style="overflow-x:auto;">
+        <table class="data-table" style="min-width:700px;">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Turf</th>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>Status</th>
+                    <th style="text-align:right;">Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for b in bookings %}
+                <tr>
+                    <td><a href="/truff-admin/bookings/{{ b.id }}/">{{ b.id }}</a></td>
+                    <td>{{ b.turf.name }}</td>
+                    <td style="white-space:nowrap;">{{ b.booking_date }}</td>
+                    <td style="white-space:nowrap;">{{ b.start_time|time:"H:i" }} &#8211; {{ b.end_time|time:"H:i" }}
+                    </td>
+                    <td><span class="badge {{ b.booking_status|status_badge }}">{{ b.booking_status }}</span></td>
+                    <td style="text-align:right;">{{ b.final_price|currency }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="6" style="text-align:center;color:#8b8fa3;">No bookings</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 </div>
 
 <!-- Call History -->
-{% if call_records %}
+{% if call_records   %}
 <div class="panel">
-    <div class="panel-title">📞 Call History</div>
-    <table class="data-table">
-        <thead>
-            <tr>
-                <th>Call ID</th>
-                <th>Booking</th>
-                <th>Turf</th>
-                <th>Owner (caller)</th>
-                <th>Status</th>
-                <th>Date</th>
-                <th>Duration</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for c in call_records %}
-            <tr>
-                <td><a href="/truff-admin/calls/{{ c.id }}/">{{ c.id }}</a></td>
-                <td><a href="/truff-admin/bookings/{{ c.booking.id }}/">#{{ c.booking.id }}</a></td>
-                <td>{{ c.booking.turf.name }}</td>
-                <td>{{ c.initiated_by.get_full_name|default:c.initiated_by.username }}</td>
-                <td>
-                    <span class="badge
-                        {% if c.status == 'completed' %}badge-success
-                        {% elif c.status == 'connected' %}badge-info
-                        {% elif c.status == 'initiated' %}badge-warning
-                        {% else %}badge-danger{% endif %}
-                    ">{{ c.status }}</span>
-                </td>
-                <td>{{ c.started_at|date:"d M Y H:i" }}</td>
-                <td>{{ c.duration_seconds }}s</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="panel-title">Call History</div>
+    <div style="overflow-x:auto;">
+        <table class="data-table" style="min-width:700px;">
+            <thead>
+                <tr>
+                    <th>Call ID</th>
+                    <th>Booking</th>
+                    <th>Turf</th>
+                    <th>Owner (caller)</th>
+                    <th>Status</th>
+                    <th>Date</th>
+                    <th>Duration</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in call_records %}
+                <tr>
+                    <td><a href="/truff-admin/calls/{{ c.id }}/">{{ c.id }}</a></td>
+                    <td><a href="/truff-admin/bookings/{{ c.booking.id }}/">#{{ c.booking.id }}</a></td>
+                    <td>{{ c.booking.turf.name }}</td>
+                    <td>{{ c.initiated_by.get_full_name|default:c.initiated_by.username }}</td>
+                    <td>
+                        <span
+                            class="badge {% if c.status == 'completed'   %}badge-success{% elif c.status == 'connected'   %}badge-info{% elif c.status == 'initiated'   %}badge-warning{% else %}badge-danger{% endif %}">{{ c.status }}</span>
+                    </td>
+                    <td style="white-space:nowrap;font-size:12px;">{{ c.started_at|date:"d M Y H:i" }}</td>
+                    <td>{{ c.duration_seconds }}s</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 </div>
 {% endif %}
 {% endblock %}

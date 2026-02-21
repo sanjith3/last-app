@@ -1,11 +1,43 @@
 {% extends "truff_admin/base.html" %}
 {% load truff_tags %}
 
-{% block title %}Settings — Truff-Admin{% endblock %}
+{% block title %}Settings &#8212; Truff-Admin{% endblock %}
 
 {% block content %}
 <div class="topbar">
     <h1>Settings</h1>
+</div>
+
+<!-- System Info -->
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-label">Django</div>
+        <div class="kpi-value" style="font-size:16px;">v{{ sys_info.django_version }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Python</div>
+        <div class="kpi-value" style="font-size:16px;">v{{ sys_info.python_version }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Database</div>
+        <div class="kpi-value" style="font-size:16px;">{{ sys_info.db_engine }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Timezone</div>
+        <div class="kpi-value" style="font-size:16px;">{{ sys_info.timezone }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Debug Mode</div>
+        <div class="kpi-value" style="font-size:16px;">{% if sys_info.debug  %}&#9888; ON{% else %}&#10004; OFF{% endif %}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Total Users</div>
+        <div class="kpi-value" style="font-size:16px;">{{ sys_info.total_users }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Total Bookings</div>
+        <div class="kpi-value" style="font-size:16px;">{{ sys_info.total_bookings }}</div>
+    </div>
 </div>
 
 <!-- Business Config -->
@@ -16,7 +48,7 @@
         <table class="data-table">
             <thead>
                 <tr>
-                    <th>Key</th>
+                    <th>Setting</th>
                     <th>Description</th>
                     <th>Value</th>
                     <th>Last Updated</th>
@@ -31,9 +63,9 @@
                         <input type="text" name="config_{{ c.key }}" value="{{ c.value }}" class="form-input"
                             style="width:120px;">
                     </td>
-                    <td style="color:var(--text-muted);font-size:12px;">
+                    <td style="color:#8b8fa3;font-size:12px;">
                         {{ c.updated_at|date:"d M Y H:i" }}
-                        {% if c.updated_by %}by {{ c.updated_by.username }}{% endif %}
+                        {% if c.updated_by  %} by {{ c.updated_by.username }}{% endif %}
                     </td>
                 </tr>
                 {% endfor %}
@@ -54,8 +86,10 @@
                 <th>ID</th>
                 <th>Username</th>
                 <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
                 <th>Staff</th>
-                <th>Truff Admin Group</th>
+                <th>Active</th>
                 <th>Last Login</th>
             </tr>
         </thead>
@@ -65,12 +99,47 @@
                 <td>{{ u.id }}</td>
                 <td>{{ u.username }}</td>
                 <td>{{ u.get_full_name|default:"-" }}</td>
-                <td>{{ u.is_staff|yesno:"✅,❌" }}</td>
-                <td>{% if "Truff Admin" in u.groups.all|join:", " %}✅{% else %}—{% endif %}</td>
-                <td>{{ u.last_login|date:"d M Y H:i"|default:"-" }}</td>
+                <td style="font-size:12px;">{{ u.email|default:"-" }}</td>
+                <td><span class="badge badge-secondary">{{ u.role|default:"admin" }}</span></td>
+                <td>{% if u.is_staff  %}&#9989;{% else %}&#10060;{% endif %}</td>
+                <td>{% if u.is_active  %}&#9989;{% else %}&#10060;{% endif %}</td>
+                <td style="font-size:12px;color:#8b8fa3;">{{ u.last_login|date:"d M Y H:i"|default:"-" }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="8" style="text-align:center;color:#8b8fa3;">No admin users</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
 </div>
+
+<!-- Recent Settings Changes -->
+{% if recent_changes  %}
+<div class="panel">
+    <div class="panel-title">Recent Settings Changes</div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Admin</th>
+                <th>Setting</th>
+                <th>Old Value</th>
+                <th>New Value</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in recent_changes %}
+            <tr>
+                <td style="white-space:nowrap;font-size:12px;">{{ log.created_at|date:"d M Y H:i" }}</td>
+                <td>{{ log.actor_name }}</td>
+                <td style="font-family:monospace;font-size:13px;">{{ log.details.key|default:"-" }}</td>
+                <td style="color:#ef4444;font-size:13px;">{{ log.details.old_value|default:"-" }}</td>
+                <td style="color:#22c55e;font-size:13px;">{{ log.details.new_value|default:"-" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
 {% endblock %}

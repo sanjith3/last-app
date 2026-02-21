@@ -1,78 +1,114 @@
 {% extends "truff_admin/base.html" %}
 {% load truff_tags %}
 
-{% block title %}Audit Log — Truff-Admin{% endblock %}
+{% block title %}Audit Log &#8212; Truff-Admin{% endblock %}
 
 {% block content %}
 <div class="topbar">
     <h1>Audit Log</h1>
     <div class="topbar-actions">
-        <span style="color:var(--text-muted);font-size:12px;">Immutable — Read Only</span>
+        <span style="color:#8b8fa3;font-size:12px;">Immutable &#8212; Read Only</span>
     </div>
 </div>
 
+<!-- Summary Stats -->
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-label">Total Entries</div>
+        <div class="kpi-value">{{ summary.total }}</div>
+    </div>
+    <div class="kpi-card accent">
+        <div class="kpi-label">Today's Actions</div>
+        <div class="kpi-value">{{ summary.today }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Unique Actors</div>
+        <div class="kpi-value">{{ summary.actors }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Filtered Results</div>
+        <div class="kpi-value">{{ summary.filtered }}</div>
+    </div>
+</div>
+
+<!-- Filters -->
 <div class="filter-bar">
-    <form method="get" style="display:flex;gap:10px;flex-wrap:wrap;">
-        <input type="text" name="q" class="form-input" placeholder="Search actor, action, model..."
-            value="{{ search_query }}" style="width:250px;">
+    <form method="get" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;width:100%;">
+        <input type="text" name="q" class="form-input" placeholder="Search actor, action, model, IP..."
+            value="{{ search_query }}" style="width:220px;">
         <select name="action" class="form-select">
             <option value="">All Actions</option>
             {% for a in actions %}
-            <option value="{{ a }}" {% if current_action == a %}selected{% endif %}>{{ a }}</option>
+            <option value="{{ a }}" {% if current_action == a  %}selected{% endif %}>{{ a|format_action }}</option>
             {% endfor %}
         </select>
+        <select name="model" class="form-select">
+            <option value="">All Models</option>
+            {% for m in models_list %}
+            <option value="{{ m }}" {% if current_model == m  %}selected{% endif %}>{{ m }}</option>
+            {% endfor %}
+        </select>
+        <input type="date" name="date_from" class="form-input" value="{{ date_from }}" title="From date">
+        <input type="date" name="date_to" class="form-input" value="{{ date_to }}" title="To date">
         <button type="submit" class="btn btn-primary btn-sm">Filter</button>
         <a href="/truff-admin/audit-log/" class="btn btn-outline btn-sm">Reset</a>
     </form>
 </div>
 
+<!-- Audit Log Table -->
 <div class="panel">
-    <table class="data-table">
-        <thead>
-            <tr>
-                <th>Time</th>
-                <th>Admin</th>
-                <th>Action</th>
-                <th>Target</th>
-                <th>ID</th>
-                <th>IP</th>
-                <th>Details</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for log in page %}
-            <tr>
-                <td style="white-space:nowrap;">{{ log.created_at|date:"d M Y H:i" }}</td>
-                <td>{{ log.actor_name }}</td>
-                <td><span class="badge badge-secondary">{{ log.action }}</span></td>
-                <td>{{ log.target_model }}</td>
-                <td>{{ log.target_id }}</td>
-                <td style="font-size:12px;">{{ log.ip_address|default:"-" }}</td>
-                <td style="font-size:12px;max-width:300px;">{{ log.details|pretty_json }}</td>
-                </td>
-            </tr>
-            {% empty %}
-            <tr>
-                <td colspan="7" style="text-align:center;color:var(--text-muted);">No audit entries</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div style="overflow-x:auto;">
+        <table class="data-table" style="min-width:950px;">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Actor</th>
+                    <th>Action</th>
+                    <th>Target</th>
+                    <th>ID</th>
+                    <th>IP Address</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in page %}
+                <tr>
+                    <td style="white-space:nowrap;font-size:12px;">{{ log.created_at|date:"d M Y H:i" }}</td>
+                    <td style="white-space:nowrap;">{{ log.actor_name }}</td>
+                    <td><span class="badge badge-secondary">{{ log.action|format_action }}</span></td>
+                    <td>{{ log.target_model }}</td>
+                    <td>{{ log.target_id }}</td>
+                    <td style="font-size:12px;color:#8b8fa3;">{{ log.ip_address|default:"-" }}</td>
+                    <td style="font-size:12px;max-width:300px;">{{ log.details|format_audit_details }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="7" style="text-align:center;color:#8b8fa3;">No audit entries</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 
-    {% if page.has_other_pages %}
+    {% if page.has_other_pages  %}
     <div class="pagination">
-        {% if page.has_previous %}
-        <a href="?page={{ page.previous_page_number }}&q={{ search_query }}&action={{ current_action }}">← Prev</a>
+        {% if page.has_previous  %}
+        <a
+            href="?page={{ page.previous_page_number }}&q={{ search_query }}&action={{ current_action }}&model={{ current_model }}&date_from={{ date_from }}&date_to={{ date_to }}">&#8592;
+            Prev</a>
         {% endif %}
         {% for num in page.paginator.page_range %}
-        {% if page.number == num %}
+        {% if page.number == num  %}
         <span class="active">{{ num }}</span>
-        {% elif num > page.number|add:"-3" and num < page.number|add:"3" %} <a
-            href="?page={{ num }}&q={{ search_query }}&action={{ current_action }}">{{ num }}</a>
+        {% elif num > page.number|add:"-3" and num < page.number|add:"3"  %} <a
+            href="?page={{ num }}&q={{ search_query }}&action={{ current_action }}&model={{ current_model }}&date_from={{ date_from }}&date_to={{ date_to }}">
+            {{ num }}</a>
             {% endif %}
             {% endfor %}
-            {% if page.has_next %}
-            <a href="?page={{ page.next_page_number }}&q={{ search_query }}&action={{ current_action }}">Next →</a>
+            {% if page.has_next  %}
+            <a
+                href="?page={{ page.next_page_number }}&q={{ search_query }}&action={{ current_action }}&model={{ current_model }}&date_from={{ date_from }}&date_to={{ date_to }}">Next
+                &#8594;</a>
             {% endif %}
     </div>
     {% endif %}

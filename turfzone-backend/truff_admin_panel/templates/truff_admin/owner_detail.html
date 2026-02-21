@@ -7,14 +7,14 @@
 <div class="topbar">
     <h1>Owner: {{ owner.get_full_name|default:owner.username }}</h1>
     <div class="topbar-actions">
-        <a href="/truff-admin/owners/" class="btn btn-outline btn-sm">← Back</a>
+        <a href="/truff-admin/owners/" class="btn btn-outline btn-sm">&#8592; Back</a>
     </div>
 </div>
 
 <!-- Stats -->
 <div class="kpi-grid">
     <div class="kpi-card accent">
-        <div class="kpi-label">Total Revenue</div>
+        <div class="kpi-label">Total Customer Payments</div>
         <div class="kpi-value">{{ stats.total_revenue|currency }}</div>
     </div>
     <div class="kpi-card">
@@ -22,8 +22,19 @@
         <div class="kpi-value">{{ stats.total_bookings|default:0 }}</div>
     </div>
     <div class="kpi-card">
-        <div class="kpi-label">Platform Fee Earned</div>
-        <div class="kpi-value">{{ stats.total_platform_fee|currency }}</div>
+        <div class="kpi-label">Platform Fees (incl. GST)</div>
+        <div class="kpi-value">{{ stats.platform_fees_incl_gst|currency }}</div>
+        <div class="kpi-sub" style="font-size:11px;color:#8b8fa3;margin-top:4px;">Base: {{ stats.total_platform_fee|currency }} + GST: {{ stats.total_gst_on_platform_fee|currency }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Commission 5% (incl. GST)</div>
+        <div class="kpi-value">{{ stats.commission_incl_gst|currency }}</div>
+        <div class="kpi-sub" style="font-size:11px;color:#8b8fa3;margin-top:4px;">Base: {{ stats.total_commission|currency }} + GST: {{ stats.total_gst_on_commission|currency }}</div>
+    </div>
+    <div class="kpi-card accent">
+        <div class="kpi-label">Platform Revenue</div>
+        <div class="kpi-value">{{ stats.total_platform_revenue|currency }}</div>
+        <div class="kpi-sub" style="font-size:11px;color:#8b8fa3;margin-top:4px;">Fees + Commission (incl. GST)</div>
     </div>
     <div class="kpi-card accent">
         <div class="kpi-label">Owner Payout</div>
@@ -65,7 +76,7 @@
             </tr>
             {% empty %}
             <tr>
-                <td colspan="4" style="text-align:center;color:var(--text-muted);">No turfs</td>
+                <td colspan="4" style="text-align:center;color:#8b8fa3;">No turfs</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -94,11 +105,11 @@
                 <td>{{ b.user.username }}</td>
                 <td>{{ b.booking_date }}</td>
                 <td><span class="badge {{ b.booking_status|status_badge }}">{{ b.booking_status }}</span></td>
-                <td>₹{{ b.final_price }}</td>
+                <td>&#8377;{{ b.final_price }}</td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="6" style="text-align:center;color:var(--text-muted);">No bookings</td>
+                <td colspan="6" style="text-align:center;color:#8b8fa3;">No bookings</td>
             </tr>
             {% endfor %}
         </tbody>
