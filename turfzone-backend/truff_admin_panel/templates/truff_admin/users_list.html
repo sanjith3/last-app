@@ -17,17 +17,17 @@
             value="{{ search_query }}" style="width:220px;">
         <select name="verified" class="form-select">
             <option value="">All Status</option>
-            <option value="yes" {% if verified_filter=='yes' %}selected{% endif %}>✅ Verified</option>
-            <option value="no" {% if verified_filter=='no' %}selected{% endif %}>❌ Unverified</option>
+            <option value="yes" {% if verified_filter == 'yes' %}selected{% endif %}>✅ Verified</option>
+            <option value="no" {% if verified_filter == 'no' %}selected{% endif %}>❌ Unverified</option>
         </select>
         <input type="date" name="date_from" class="form-input" value="{{ date_from }}" title="Joined from">
         <input type="date" name="date_to" class="form-input" value="{{ date_to }}" title="Joined to">
         <select name="sort" class="form-select">
-            <option value="-joined" {% if current_sort=='-joined' %}selected{% endif %}>Newest First</option>
-            <option value="joined" {% if current_sort=='joined' %}selected{% endif %}>Oldest First</option>
-            <option value="-bookings" {% if current_sort=='-bookings' %}selected{% endif %}>Most Bookings</option>
-            <option value="-spent" {% if current_sort=='-spent' %}selected{% endif %}>Highest Spender</option>
-            <option value="name" {% if current_sort=='name' %}selected{% endif %}>Name A-Z</option>
+            <option value="-joined" {% if current_sort == '-joined' %}selected{% endif %}>Newest First</option>
+            <option value="joined" {% if current_sort == 'joined' %}selected{% endif %}>Oldest First</option>
+            <option value="-bookings" {% if current_sort == '-bookings' %}selected{% endif %}>Most Bookings</option>
+            <option value="-spent" {% if current_sort == '-spent' %}selected{% endif %}>Highest Spender</option>
+            <option value="name" {% if current_sort == 'name' %}selected{% endif %}>Name A-Z</option>
         </select>
         <button type="submit" class="btn btn-primary btn-sm">Filter</button>
         <a href="/truff-admin/users/" class="btn btn-outline btn-sm">Reset</a>

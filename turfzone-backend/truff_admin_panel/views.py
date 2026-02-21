@@ -104,18 +104,43 @@ class DashboardView(TruffAdminRequiredMixin, View):
             confirmed_bookings = Booking.objects.filter(
                 booking_status__in=[BookingStatus.CONFIRMED, BookingStatus.COMPLETED]
             )
-            total_rev = confirmed_bookings.aggregate(s=Sum('platform_fee'))['s'] or Decimal('0')
-            today_rev = confirmed_bookings.filter(
+
+            # All-time aggregates
+            totals = confirmed_bookings.aggregate(
+                user_fees=Sum('platform_fee'),
+                owner_commission=Sum('commission'),
+            )
+            total_user_fees = totals['user_fees'] or Decimal('0')
+            total_owner_commission = totals['owner_commission'] or Decimal('0')
+            total_revenue = total_user_fees + total_owner_commission
+
+            # Today aggregates
+            today_totals = confirmed_bookings.filter(
                 booking_date=today
-            ).aggregate(s=Sum('platform_fee'))['s'] or Decimal('0')
+            ).aggregate(
+                user_fees=Sum('platform_fee'),
+                owner_commission=Sum('commission'),
+            )
+            today_user_fees = today_totals['user_fees'] or Decimal('0')
+            today_owner_commission = today_totals['owner_commission'] or Decimal('0')
+            today_revenue = today_user_fees + today_owner_commission
+
         except Exception:
-            total_rev = Decimal('0')
-            today_rev = Decimal('0')
+            total_revenue = Decimal('0')
+            today_revenue = Decimal('0')
+            total_user_fees = Decimal('0')
+            total_owner_commission = Decimal('0')
+            today_user_fees = Decimal('0')
+            today_owner_commission = Decimal('0')
             confirmed_bookings = Booking.objects.none()
 
         return {
-            'total_revenue': total_rev,
-            'today_revenue': today_rev,
+            'total_revenue': total_revenue,
+            'today_revenue': today_revenue,
+            'total_user_fees': total_user_fees,
+            'total_owner_commission': total_owner_commission,
+            'today_user_fees': today_user_fees,
+            'today_owner_commission': today_owner_commission,
             'total_transactions': confirmed_bookings.count(),
             'active_turfs': Turf.objects.filter(status=TurfStatus.APPROVED, is_active=True).count(),
             'pending_turfs': Turf.objects.filter(status=TurfStatus.PENDING).count(),
@@ -140,7 +165,7 @@ class DashboardView(TruffAdminRequiredMixin, View):
                     )
                     .extra(select={'month_str': "strftime('%%Y-%%m', booking_date)"})
                     .values('month_str')
-                    .annotate(total=Sum('platform_fee'))
+                    .annotate(total=Sum(F('platform_fee') + F('commission')))
                     .order_by('month_str')
                 )
                 return [
@@ -156,7 +181,7 @@ class DashboardView(TruffAdminRequiredMixin, View):
                     )
                     .annotate(month=TruncMonth('booking_date'))
                     .values('month')
-                    .annotate(total=Sum('platform_fee'))
+                    .annotate(total=Sum(F('platform_fee') + F('commission')))
                     .order_by('month')
                 )
                 return [
@@ -182,7 +207,7 @@ class DashboardView(TruffAdminRequiredMixin, View):
                     )
                     .extra(select={'day_str': "strftime('%%Y-%%m-%%d', booking_date)"})
                     .values('day_str')
-                    .annotate(total=Sum('platform_fee'))
+                    .annotate(total=Sum(F('platform_fee') + F('commission')))
                     .order_by('day_str')
                 )
                 return [
@@ -198,7 +223,7 @@ class DashboardView(TruffAdminRequiredMixin, View):
                     )
                     .annotate(day=TruncDate('booking_date'))
                     .values('day')
-                    .annotate(total=Sum('platform_fee'))
+                    .annotate(total=Sum(F('platform_fee') + F('commission')))
                     .order_by('day')
                 )
                 return [
@@ -267,8 +292,13 @@ class TurfDetailView(TruffAdminRequiredMixin, View):
     """View turf details + audit trail."""
 
     def get(self, request, turf_id):
-        turf = get_object_or_404(Turf.objects.select_related('owner', 'approved_by'), pk=turf_id)
+        turf = get_object_or_404(
+            Turf.objects.select_related('owner', 'approved_by').prefetch_related('sports', 'amenities'),
+            pk=turf_id,
+        )
         images = turf.images.all()
+        sports = turf.sports.all()
+        amenities = turf.amenities.all()
         audit = AdminAuditLog.objects.filter(
             target_model='Turf', target_id=turf_id
         ).order_by('-created_at')[:20]
@@ -284,6 +314,8 @@ class TurfDetailView(TruffAdminRequiredMixin, View):
         return render(request, 'truff_admin/turf_detail.html', {
             'turf': turf,
             'images': images,
+            'sports': sports,
+            'amenities': amenities,
             'audit_logs': audit,
             'recent_bookings': bookings,
             'future_bookings_count': future_bookings_count,

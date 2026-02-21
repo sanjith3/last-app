@@ -40,16 +40,14 @@
                 <td><strong>Owner (initiated by)</strong></td>
                 <td>
                     {{ call.initiated_by.first_name }} {{ call.initiated_by.last_name }}
-                    <br><small style="color:var(--text-muted);">📱 {{ call.initiated_by.phone_number|default:"N/A"
-                        }}</small>
+                    <br><small style="color:var(--text-muted);">📱 {{ call.initiated_by.phone_number|default:"N/A" }}</small>
                 </td>
             </tr>
             <tr>
                 <td><strong>Customer</strong></td>
                 <td>
                     {{ call.booking.user.first_name }} {{ call.booking.user.last_name }}
-                    <br><strong style="color:var(--primary);">📱 {{ call.booking.user.phone_number|default:"N/A"
-                        }}</strong>
+                    <br><strong style="color:var(--primary);">📱 {{ call.booking.user.phone_number|default:"N/A" }}</strong>
                 </td>
             </tr>
             <tr>

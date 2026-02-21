@@ -3,8 +3,23 @@ Custom template tags for Truff-Admin templates.
 """
 
 from django import template
+from django.utils.safestring import mark_safe
 
 register = template.Library()
+
+
+@register.filter
+def pretty_json(value):
+    """Format a JSONField dict as readable key: value lines."""
+    if not value or value == {}:
+        return mark_safe('&mdash;')
+    if isinstance(value, dict):
+        parts = []
+        for k, v in value.items():
+            key = str(k).replace('_', ' ').title()
+            parts.append(f'<b>{key}:</b> {v}')
+        return mark_safe('<br>'.join(parts))
+    return str(value)
 
 
 @register.filter

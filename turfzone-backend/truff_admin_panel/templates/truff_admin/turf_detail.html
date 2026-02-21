@@ -16,18 +16,32 @@
     <div class="detail-grid">
         <div class="detail-item"><label>ID</label><span>{{ turf.id }}</span></div>
         <div class="detail-item"><label>Name</label><span>{{ turf.name }}</span></div>
-        <div class="detail-item"><label>City</label><span>{{ turf.city|default:"-" }}</span></div>
-        <div class="detail-item"><label>Owner</label><span><a href="/truff-admin/owners/{{ turf.owner.id }}/">{{ turf.owner.username }}</a></span></div>
-        <div class="detail-item"><label>Owner Email</label><span>{{ turf.owner.email|default:"-" }}</span></div>
-        <div class="detail-item"><label>Owner Phone</label><span>{{ turf.owner.phone_number|default:"-" }}</span></div>
-        <div class="detail-item"><label>Status</label><span class="badge {{ turf.status|status_badge }}">{{ turf.status }}</span></div>
-        <div class="detail-item"><label>Rating</label><span>{{ turf.rating }}</span></div>
+        <div class="detail-item">
+            <label>Status</label>
+            <span class="badge {{ turf.status|status_badge }}">{{ turf.status }}</span>
+        </div>
         <div class="detail-item"><label>Price/Hour</label><span>&#8377;{{ turf.price_per_hour }}</span></div>
-        <div class="detail-item"><label>Address</label><span>{{ turf.address|default:"-" }}</span></div>
+        <div class="detail-item"><label>Max Players</label><span>{{ turf.max_players }}</span></div>
+        <div class="detail-item"><label>Rating</label><span>{{ turf.rating }} ({{ turf.review_count }} reviews)</span>
+        </div>
+        <div class="detail-item">
+            <label>Active</label>
+            <span>{% if turf.is_active %}Yes{% else %}No{% endif %}</span>
+        </div>
         <div class="detail-item"><label>Created</label><span>{{ turf.created_at|date:"d M Y H:i" }}</span></div>
-        <div class="detail-item"><label>Approved At</label><span>{% if turf.approved_at %}{{ turf.approved_at|date:"d M Y H:i" }}{% else %}-{% endif %}</span></div>
+        <div class="detail-item"><label>Updated</label><span>{{ turf.updated_at|date:"d M Y H:i" }}</span></div>
+        <div class="detail-item">
+            <label>Approved At</label>
+            <span>{% if turf.approved_at %}{{ turf.approved_at|date:"d M Y H:i" }}{% else %}-{% endif %}</span>
+        </div>
         <div class="detail-item"><label>Approved By</label><span>{{ turf.approved_by.username|default:"-" }}</span>
         </div>
+        {% if turf.description %}
+        <div class="detail-item" style="grid-column:1/-1;">
+            <label>Description</label>
+            <span>{{ turf.description }}</span>
+        </div>
+        {% endif %}
         {% if turf.rejection_reason %}
         <div class="detail-item" style="grid-column:1/-1;">
             <label>Rejection Reason</label>
@@ -44,44 +58,123 @@
 </div>
 
 <div class="panel">
+    <div class="panel-title">Owner Information</div>
+    <div class="detail-grid">
+        <div class="detail-item">
+            <label>Username</label>
+            <span><a href="/truff-admin/owners/{{ turf.owner.id }}/">{{ turf.owner.username }}</a></span>
+        </div>
+        <div class="detail-item"><label>Name</label><span>{{ turf.owner.get_full_name|default:"-" }}</span></div>
+        <div class="detail-item"><label>Email</label><span>{{ turf.owner.email|default:"-" }}</span></div>
+        <div class="detail-item"><label>Phone</label><span>{{ turf.owner.phone_number|default:"-" }}</span></div>
+        <div class="detail-item"><label>Joined</label><span>{{ turf.owner.date_joined|date:"d M Y" }}</span></div>
+    </div>
+</div>
+
+<div class="panel">
+    <div class="panel-title">Location &amp; Map</div>
+    <div class="detail-grid">
+        <div class="detail-item" style="grid-column:1/-1;">
+            <label>Full Address</label>
+            <span>{{ turf.address|default:"-" }}{% if turf.city %}, {{ turf.city }}{% endif %}{% if turf.state %}, {{ turf.state }}{% endif %}{% if turf.postal_code %} - {{ turf.postal_code }}{% endif %}</span>
+        </div>
+        <div class="detail-item"><label>City</label><span>{{ turf.city|default:"-" }}</span></div>
+        <div class="detail-item"><label>State</label><span>{{ turf.state|default:"-" }}</span></div>
+        <div class="detail-item"><label>Postal Code</label><span>{{ turf.postal_code|default:"-" }}</span></div>
+        <div class="detail-item"><label>Latitude</label><span>{{ turf.latitude }}</span></div>
+        <div class="detail-item"><label>Longitude</label><span>{{ turf.longitude }}</span></div>
+        {% if turf.google_maps_share_link %}
+        <div class="detail-item" style="grid-column:1/-1;">
+            <label>Google Maps</label>
+            <span><a href="{{ turf.google_maps_share_link }}" target="_blank" rel="noopener"
+                    style="color:var(--primary);text-decoration:underline;">View on Google Maps</a></span>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="panel">
+    <div class="panel-title">Sports &amp; Amenities</div>
+    <div style="margin-bottom:16px;">
+        <label
+            style="font-size:12px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;display:block;">Sports
+            Available</label>
+        {% if sports %}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            {% for sport in sports %}
+            <span
+                style="background:rgba(34,197,94,0.15);color:#22c55e;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500;">{{ sport.name }}</span>
+            {% endfor %}
+        </div>
+        {% else %}
+        <span style="color:var(--text-muted);font-size:13px;">No sports listed</span>
+        {% endif %}
+    </div>
+    <div>
+        <label
+            style="font-size:12px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;display:block;">Amenities</label>
+        {% if amenities %}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            {% for amenity in amenities %}
+            <span
+                style="background:rgba(59,130,246,0.15);color:#3b82f6;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500;">{{ amenity.name }}</span>
+            {% endfor %}
+        </div>
+        {% else %}
+        <span style="color:var(--text-muted);font-size:13px;">No amenities listed</span>
+        {% endif %}
+    </div>
+</div>
+
+<div class="panel">
+    <div class="panel-title">Photos ({{ images|length }})</div>
+    {% if images %}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;">
+        {% for img in images %}
+        <div style="position:relative;">
+            <img src="{{ img.image.url }}" alt="{{ img.caption|default:turf.name }}"
+                onclick="openLightbox('{{ img.image.url }}')"
+                style="width:100%;height:160px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer;">
+            {% if img.is_cover %}
+            <span
+                style="position:absolute;top:8px;left:8px;background:var(--primary);color:#fff;padding:2px 10px;border-radius:4px;font-size:11px;font-weight:600;">COVER</span>
+            {% endif %}
+            {% if img.caption %}
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">{{ img.caption }}</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div style="text-align:center;color:var(--text-muted);padding:30px 0;">No images uploaded</div>
+    {% endif %}
+</div>
+
+<div class="panel">
     <div class="panel-title">Admin Actions</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
         {% if turf.status == 'pending' %}
         <form method="post" action="/truff-admin/turfs/{{ turf.id }}/action/" style="display:inline;">
             {% csrf_token %}
             <input type="hidden" name="action" value="approve">
-            <button type="submit" class="btn btn-primary" onclick="return confirm('Approve this turf?')">✅
-                Approve</button>
+            <button type="submit" class="btn btn-primary"
+                onclick="return confirm('Approve this turf?')">Approve</button>
         </form>
-        <button class="btn btn-danger" onclick="showModal('reject')">❌ Reject</button>
+        <button class="btn btn-danger" onclick="showModal('reject')">Reject</button>
         {% endif %}
-
         {% if turf.status == 'approved' %}
-        <button class="btn btn-warning" onclick="showModal('suspend')">⚠️ Suspend</button>
+        <button class="btn btn-warning" onclick="showModal('suspend')">Suspend</button>
         {% endif %}
-
         {% if turf.status == 'suspended' or turf.status == 'rejected' %}
         <form method="post" action="/truff-admin/turfs/{{ turf.id }}/action/" style="display:inline;">
             {% csrf_token %}
             <input type="hidden" name="action" value="reactivate">
-            <button type="submit" class="btn btn-primary" onclick="return confirm('Reactivate this turf?')">🔄
-                Reactivate</button>
+            <button type="submit" class="btn btn-primary"
+                onclick="return confirm('Reactivate this turf?')">Reactivate</button>
         </form>
         {% endif %}
     </div>
 </div>
-
-{% if images %}
-<div class="panel">
-    <div class="panel-title">Images</div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;">
-        {% for img in images %}
-        <img src="{{ img.image.url }}"
-            style="width:150px;height:100px;object-fit:cover;border-radius:6px;border:1px solid var(--border);">
-        {% endfor %}
-    </div>
-</div>
-{% endif %}
 
 <div class="panel">
     <div class="panel-title">Recent Bookings</div>
@@ -91,6 +184,7 @@
                 <th>ID</th>
                 <th>User</th>
                 <th>Date</th>
+                <th>Time</th>
                 <th>Status</th>
                 <th>Amount</th>
             </tr>
@@ -101,12 +195,13 @@
                 <td><a href="/truff-admin/bookings/{{ b.id }}/">{{ b.id }}</a></td>
                 <td>{{ b.user.username }}</td>
                 <td>{{ b.booking_date }}</td>
+                <td>{{ b.start_time|time:"H:i" }} - {{ b.end_time|time:"H:i" }}</td>
                 <td><span class="badge {{ b.booking_status|status_badge }}">{{ b.booking_status }}</span></td>
                 <td>&#8377;{{ b.final_price }}</td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="5" style="text-align:center;color:var(--text-muted);">No bookings</td>
+                <td colspan="6" style="text-align:center;color:var(--text-muted);">No bookings</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -141,7 +236,12 @@
     </table>
 </div>
 
-<!-- Reject / Suspend Modal -->
+<div id="lightbox" onclick="closeLightbox()"
+    style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:9999;justify-content:center;align-items:center;cursor:pointer;">
+    <img id="lightboxImg" style="max-width:90%;max-height:90%;border-radius:8px;">
+    <span style="position:absolute;top:20px;right:30px;color:#fff;font-size:32px;cursor:pointer;">&times;</span>
+</div>
+
 <div class="modal-overlay" id="actionModal">
     <div class="modal-box">
         <h3 id="modalTitle">Provide Reason</h3>
@@ -149,7 +249,6 @@
             {% csrf_token %}
             <input type="hidden" name="action" id="modalAction">
             <textarea name="reason" placeholder="Enter reason (required)..." required></textarea>
-
             {% if future_bookings_count > 0 %}
             <div id="suspendBookingsOpt" style="display:none;margin-top:10px;">
                 <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
@@ -158,7 +257,6 @@
                 </label>
             </div>
             {% endif %}
-
             <div class="modal-actions">
                 <button type="button" class="btn btn-outline" onclick="hideModal()">Cancel</button>
                 <button type="submit" class="btn btn-danger">Confirm</button>
@@ -170,16 +268,18 @@
 <script>
     function showModal(action) {
         document.getElementById('modalAction').value = action;
-        document.getElementById('modalTitle').textContent =
-            action === 'reject' ? 'Reject Turf' : 'Suspend Turf';
+        document.getElementById('modalTitle').textContent = action === 'reject' ? 'Reject Turf' : 'Suspend Turf';
         document.getElementById('actionModal').classList.add('active');
-
-        // Show cancel bookings checkbox only for suspend
         var opt = document.getElementById('suspendBookingsOpt');
         if (opt) opt.style.display = action === 'suspend' ? 'block' : 'none';
     }
-    function hideModal() {
-        document.getElementById('actionModal').classList.remove('active');
+    function hideModal() { document.getElementById('actionModal').classList.remove('active'); }
+    function openLightbox(url) {
+        var lb = document.getElementById('lightbox');
+        document.getElementById('lightboxImg').src = url;
+        lb.style.display = 'flex';
     }
+    function closeLightbox() { document.getElementById('lightbox').style.display = 'none'; }
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeLightbox(); });
 </script>
 {% endblock %}

@@ -60,7 +60,10 @@ class BookingPreview(models.Model):
     gst_on_platform_fee = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     total_payable = models.DecimalField(max_digits=10, decimal_places=2)
     commission = models.DecimalField(max_digits=10, decimal_places=2)
+    gst_on_commission = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    commission_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('5.00'))
     owner_payout = models.DecimalField(max_digits=10, decimal_places=2)
+    platform_revenue = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
 
     # Idempotency & expiry
     is_used = models.BooleanField(default=False)
@@ -119,8 +122,11 @@ class Booking(models.Model):
     # Financial fields (populated by confirm flow)
     gst_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     commission = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    gst_on_commission = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    commission_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('5.00'))
     platform_fee = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     gst_on_platform_fee = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    platform_revenue = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     owner_payout = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     payout_status = models.CharField(
         max_length=20,

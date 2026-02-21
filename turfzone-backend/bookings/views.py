@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 GST_RATE = Decimal('0.18')             # 18% GST
 COMMISSION_RATE = Decimal('0.05')       # 5% platform commission
-PLATFORM_FEE = Decimal('0.00')          # Platform fee per booking (configurable)
+PLATFORM_FEE = Decimal('10.00')         # Platform fee per booking (configurable)
 QUANTIZE_PLACES = Decimal('0.01')
 
 
@@ -197,7 +197,9 @@ def _compute_financial_breakdown(slots_pricing):
     gst_on_platform_fee = _quantize(platform_fee * GST_RATE)
     total_payable = _quantize(subtotal + gst_amount + platform_fee + gst_on_platform_fee)
     commission = _quantize(subtotal * COMMISSION_RATE)
-    owner_payout = _quantize(subtotal - commission)
+    gst_on_commission = _quantize(commission * GST_RATE)
+    owner_payout = _quantize(subtotal + gst_amount - commission - gst_on_commission)
+    platform_revenue = _quantize(platform_fee + gst_on_platform_fee + commission + gst_on_commission)
 
     return {
         'subtotal': subtotal,
@@ -207,13 +209,16 @@ def _compute_financial_breakdown(slots_pricing):
         'gst_on_platform_fee': gst_on_platform_fee,
         'total_payable': total_payable,
         'commission': commission,
+        'gst_on_commission': gst_on_commission,
+        'commission_percent': COMMISSION_RATE * Decimal('100'),
         'owner_payout': owner_payout,
+        'platform_revenue': platform_revenue,
     }
 
 
 def _create_ledger_entries(booking, financials):
     """
-    Create 4 double-entry ledger rows for a confirmed booking.
+    Create double-entry ledger rows for a confirmed booking.
     Enforces sum(debit) == sum(credit).
     """
     from finance.models import LedgerEntry, EntryType, LedgerAccount
@@ -815,7 +820,10 @@ class BookingViewSet(viewsets.ModelViewSet):
             gst_on_platform_fee=financials['gst_on_platform_fee'],
             total_payable=financials['total_payable'],
             commission=financials['commission'],
+            gst_on_commission=financials['gst_on_commission'],
+            commission_percent=financials['commission_percent'],
             owner_payout=financials['owner_payout'],
+            platform_revenue=financials['platform_revenue'],
             expires_at=timezone.now() + timedelta(minutes=5),
         )
 
@@ -832,8 +840,26 @@ class BookingViewSet(viewsets.ModelViewSet):
             'platform_fee': str(financials['platform_fee']),
             'gst_on_platform_fee': str(financials['gst_on_platform_fee']),
             'total_payable': str(financials['total_payable']),
+            'price_breakdown': {
+                'subtotal': str(financials['subtotal']),
+                'gst_on_slots': str(financials['gst_amount']),
+                'platform_fee': str(financials['platform_fee']),
+                'gst_on_platform_fee': str(financials['gst_on_platform_fee']),
+                'total_payable': str(financials['total_payable']),
+            },
+            'owner_settlement': {
+                'subtotal': str(financials['subtotal']),
+                'gst_on_slots': str(financials['gst_amount']),
+                'commission_percent': str(financials['commission_percent']),
+                'commission_amount': str(financials['commission']),
+                'gst_on_commission': str(financials['gst_on_commission']),
+                'owner_payout': str(financials['owner_payout']),
+                'platform_revenue': str(financials['platform_revenue']),
+            },
             'commission': str(financials['commission']),
+            'gst_on_commission': str(financials['gst_on_commission']),
             'owner_payout': str(financials['owner_payout']),
+            'platform_revenue': str(financials['platform_revenue']),
             'expires_at': preview.expires_at.isoformat(),
         }, status=status.HTTP_200_OK)
 
@@ -986,8 +1012,11 @@ class BookingViewSet(viewsets.ModelViewSet):
                     final_price=financials['subtotal'],
                     gst_amount=financials['gst_amount'],
                     commission=financials['commission'],
+                    gst_on_commission=financials['gst_on_commission'],
+                    commission_percent=financials['commission_percent'],
                     platform_fee=financials['platform_fee'],
                     gst_on_platform_fee=financials['gst_on_platform_fee'],
+                    platform_revenue=financials['platform_revenue'],
                     owner_payout=financials['owner_payout'],
                     booking_status=BookingStatus.CONFIRMED,
                     payment_status=PaymentStatus.PAID,

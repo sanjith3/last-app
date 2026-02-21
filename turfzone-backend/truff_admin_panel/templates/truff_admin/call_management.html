@@ -22,7 +22,7 @@
         <select name="status" class="form-select">
             <option value="">All Status</option>
             {% for val, label in status_choices %}
-            <option value="{{ val }}" {% if current_status==val %}selected{% endif %}>{{ label }}</option>
+            <option value="{{ val }}" {% if current_status == val %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
         </select>
         <input type="text" name="owner" class="form-input" placeholder="Owner username" value="{{ owner_filter }}"

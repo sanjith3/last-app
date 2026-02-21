@@ -78,8 +78,7 @@
         {% if page.number == num %}
         <span class="active">{{ num }}</span>
         {% elif num > page.number|add:"-3" and num < page.number|add:"3" %} <a
-            href="?page={{ num }}&q={{ search_query }}&status={{ current_status }}&city={{ current_city }}">{{ num
-            }}</a>
+            href="?page={{ num }}&q={{ search_query }}&status={{ current_status }}&city={{ current_city }}">{{ num }}</a>
             {% endif %}
             {% endfor %}
             {% if page.has_next %}
