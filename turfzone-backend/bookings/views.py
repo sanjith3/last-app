@@ -807,6 +807,12 @@ class BookingViewSet(viewsets.ModelViewSet):
         # Compute full financial breakdown (GST calculated here only)
         financials = _compute_financial_breakdown(slots_pricing)
 
+        # ─── First Booking Discount (₹50 for new users) ───
+        first_booking_discount = Decimal('0.00')
+        if request.user.total_bookings == 0:
+            first_booking_discount = min(Decimal('50.00'), financials['total_payable'])
+            financials['total_payable'] = _quantize(financials['total_payable'] - first_booking_discount)
+
         # Create preview token (5-minute expiry)
         preview = BookingPreview.objects.create(
             user=request.user,
@@ -824,6 +830,7 @@ class BookingViewSet(viewsets.ModelViewSet):
             commission_percent=financials['commission_percent'],
             owner_payout=financials['owner_payout'],
             platform_revenue=financials['platform_revenue'],
+            first_booking_discount=first_booking_discount,
             expires_at=timezone.now() + timedelta(minutes=5),
         )
 
@@ -839,12 +846,14 @@ class BookingViewSet(viewsets.ModelViewSet):
             'gst_amount': str(financials['gst_amount']),
             'platform_fee': str(financials['platform_fee']),
             'gst_on_platform_fee': str(financials['gst_on_platform_fee']),
+            'first_booking_discount': str(first_booking_discount),
             'total_payable': str(financials['total_payable']),
             'price_breakdown': {
                 'subtotal': str(financials['subtotal']),
                 'gst_on_slots': str(financials['gst_amount']),
                 'platform_fee': str(financials['platform_fee']),
                 'gst_on_platform_fee': str(financials['gst_on_platform_fee']),
+                'first_booking_discount': str(first_booking_discount),
                 'total_payable': str(financials['total_payable']),
             },
             'owner_settlement': {
@@ -982,6 +991,13 @@ class BookingViewSet(viewsets.ModelViewSet):
 
                 financials = _compute_financial_breakdown(slots_pricing)
 
+                # 6b. Re-apply first booking discount from preview
+                first_booking_discount = preview.first_booking_discount
+                if first_booking_discount > Decimal('0'):
+                    financials['total_payable'] = _quantize(
+                        financials['total_payable'] - first_booking_discount
+                    )
+
                 # 7. Compare total — reject if mismatch
                 if abs(financials['total_payable'] - client_total) > Decimal('0.01'):
                     return Response({
@@ -1052,9 +1068,13 @@ class BookingViewSet(viewsets.ModelViewSet):
                 # Guarded by preview.is_used (step 2) — double-confirm impossible.
                 User = get_user_model()
                 user_locked = User.objects.select_for_update().get(pk=request.user.pk)
+                if not user_locked.first_booking_completed:
+                    user_locked.first_booking_completed = True
                 user_locked.total_bookings += 1
                 user_locked.total_credits += 10  # Backend rule: 10 credits per booking
-                user_locked.save(update_fields=['total_bookings', 'total_credits'])
+                user_locked.save(update_fields=[
+                    'total_bookings', 'total_credits', 'first_booking_completed',
+                ])
 
                 logger.info(
                     f"Booking #{booking.id} confirmed: ₹{financials['total_payable']} | "

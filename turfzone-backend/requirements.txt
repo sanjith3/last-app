@@ -13,3 +13,4 @@ redis==5.0.1
 beautifulsoup4==4.12.2
 geopy==2.4.1
 django-redis==5.4.0
+razorpay==1.4.2

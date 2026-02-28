@@ -34,6 +34,8 @@ INSTALLED_APPS = [
     'bookings',
     'finance',
     'truff_admin_panel',
+    'payments',
+    'growth',
 ]
 
 MIDDLEWARE = [
@@ -179,3 +181,17 @@ LOGGING = {
         },
     },
 }
+
+# ---------------------------------------------------------------------------
+# Razorpay Configuration (Test mode by default)
+# ---------------------------------------------------------------------------
+RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID', '')
+RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET', '')
+RAZORPAY_WEBHOOK_SECRET = os.environ.get('RAZORPAY_WEBHOOK_SECRET', '')
+
+# ---------------------------------------------------------------------------
+# OTP Configuration (demo mode by default)
+# ---------------------------------------------------------------------------
+OTP_MODE = os.environ.get('OTP_MODE', 'demo')  # 'demo' or 'production'
+SMS_API_KEY = os.environ.get('SMS_API_KEY', '')
+SMS_SENDER_ID = os.environ.get('SMS_SENDER_ID', 'TRFSPT')

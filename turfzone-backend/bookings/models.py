@@ -65,6 +65,9 @@ class BookingPreview(models.Model):
     owner_payout = models.DecimalField(max_digits=10, decimal_places=2)
     platform_revenue = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
 
+    # First booking discount (₹50 for users with 0 previous bookings)
+    first_booking_discount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+
     # Idempotency & expiry
     is_used = models.BooleanField(default=False)
     expires_at = models.DateTimeField()
@@ -137,6 +140,7 @@ class Booking(models.Model):
     # Credit redemption — tracks free bookings
     is_redeemed = models.BooleanField(default=False)
     credits_used = models.PositiveIntegerField(default=0)
+    is_first_booking = models.BooleanField(default=False)
 
     # Idempotency key — prevents duplicate bookings from retries
     idempotency_key = models.UUIDField(unique=True, null=True, blank=True)
@@ -152,6 +156,11 @@ class Booking(models.Model):
         choices=PaymentStatus.choices,
         default=PaymentStatus.PENDING,
     )
+
+    # Razorpay Payment Details
+    razorpay_order_id = models.CharField(max_length=100, null=True, blank=True, db_index=True)
+    razorpay_payment_id = models.CharField(max_length=100, null=True, blank=True)
+    razorpay_signature = models.CharField(max_length=200, null=True, blank=True)
 
     # Extra Info
     notes = models.TextField(blank=True, null=True)

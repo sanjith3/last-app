@@ -6,6 +6,7 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from django.http import JsonResponse
+from django.views.generic import TemplateView
 
 
 def health_check(request):
@@ -24,7 +25,14 @@ urlpatterns = [
     path('api/turfs/', include('turfs.urls')),
     path('api/bookings/', include('bookings.urls')),
     path('api/finance/', include('finance.urls')),
+    path('api/payments/', include('payments.urls')),
+    path('api/growth/', include('growth.urls')),
     path('truff-admin/', include('truff_admin_panel.urls')),
+
+    # Legal pages (served as standalone HTML)
+    path('legal/terms/', TemplateView.as_view(template_name='legal/terms.html'), name='legal-terms'),
+    path('legal/privacy/', TemplateView.as_view(template_name='legal/privacy.html'), name='legal-privacy'),
+    path('legal/owner-agreement/', TemplateView.as_view(template_name='legal/owner_agreement.html'), name='legal-owner-agreement'),
 ]
 
 if settings.DEBUG:
