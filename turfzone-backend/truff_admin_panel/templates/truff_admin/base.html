@@ -111,9 +111,19 @@
                     <span class="icon">📞</span> Calls
                     <span class="call-badge" id="call-badge" style="display:none;">0</span>
                 </a></li>
+            <li><a href="/truff-admin/support/"
+                    class="{% if 'support' in request.resolver_match.url_name %}active{% endif %}">
+                    <span class="icon">💬</span> Support
+                    <span class="badge badge-danger" id="support-badge"
+                        style="display:none;margin-left:4px;font-size:11px;">0</span>
+                </a></li>
             <li><a href="/truff-admin/revenue/"
                     class="{% if 'revenue' in request.resolver_match.url_name %}active{% endif %}">
                     <span class="icon">💰</span> Revenue
+                </a></li>
+            <li><a href="/truff-admin/promo-codes/"
+                    class="{% if 'promo' in request.resolver_match.url_name %}active{% endif %}">
+                    <span class="icon">🏷️</span> Promo Codes
                 </a></li>
             <li><a href="/truff-admin/pin-requests/"
                     class="{% if 'pin' in request.resolver_match.url_name %}active{% endif %}">
@@ -207,6 +217,31 @@
 
             // Poll every 10 seconds
             setInterval(pollPendingCalls, 10000);
+        })();
+    </script>
+
+    <script>
+        // Poll support unread count every 15 seconds
+        (function pollSupportUnread() {
+            function update() {
+                fetch('/truff-admin/support/unread-count/')
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (data) {
+                        if (!data) return;
+                        var badge = document.getElementById('support-badge');
+                        if (badge) {
+                            if (data.unread > 0) {
+                                badge.textContent = data.unread;
+                                badge.style.display = 'inline-flex';
+                            } else {
+                                badge.style.display = 'none';
+                            }
+                        }
+                    })
+                    .catch(function () { });
+            }
+            update();
+            setInterval(update, 15000);
         })();
     </script>
 

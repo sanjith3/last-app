@@ -1,0 +1,147 @@
+{% extends "truff_admin/base.html" %}
+{% load truff_tags %}
+
+{% block title %}Support Dashboard — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="topbar">
+    <h1>&#128172; Support Chat <small style="color:#8b8fa3;font-size:14px;">({{ summary.total }} total tickets)</small>
+    </h1>
+    <div class="topbar-actions">
+        <a href="/truff-admin/support/?status=open" class="btn btn-outline btn-sm">Open ({{ summary.open }})</a>
+    </div>
+</div>
+
+<div class="kpi-grid">
+    <div class="kpi-card accent">
+        <div class="kpi-label">Open Tickets</div>
+        <div class="kpi-value">{{ summary.open }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Awaiting Reply</div>
+        <div class="kpi-value" style="color:#f97316;">{{ summary.awaiting }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Resolved Today</div>
+        <div class="kpi-value" style="color:#22c55e;">{{ summary.resolved_today }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Unread Messages</div>
+        <div class="kpi-value" style="{% if summary.unread > 0 %}color:#ef4444;{% endif %}">{{ summary.unread }}</div>
+    </div>
+</div>
+
+<div class="filter-bar">
+    <form method="get" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;width:100%;">
+        <input type="text" name="q" class="form-input" placeholder="Search ticket ID, user, subject..."
+            value="{{ search_query }}" style="width:260px;">
+        <select name="status" class="form-select">
+            <option value="">All Status</option>
+            <option value="open" {% if status_filter == "open" %}selected{% endif %}>Open</option>
+            <option value="awaiting_reply" {% if status_filter == "awaiting_reply" %}selected{% endif %}>Awaiting Reply
+            </option>
+            <option value="resolved" {% if status_filter == "resolved" %}selected{% endif %}>Resolved</option>
+            <option value="closed" {% if status_filter == "closed" %}selected{% endif %}>Closed</option>
+        </select>
+        <select name="priority" class="form-select">
+            <option value="">All Priority</option>
+            <option value="urgent" {% if priority_filter == "urgent" %}selected{% endif %}>&#128308; Urgent</option>
+            <option value="high" {% if priority_filter == "high" %}selected{% endif %}>&#128992; High</option>
+            <option value="medium" {% if priority_filter == "medium" %}selected{% endif %}>&#128993; Medium</option>
+            <option value="low" {% if priority_filter == "low" %}selected{% endif %}>&#128994; Low</option>
+        </select>
+        <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+        <a href="/truff-admin/support/" class="btn btn-outline btn-sm">Reset</a>
+    </form>
+</div>
+
+<div class="panel">
+    <div style="overflow-x:auto;">
+        <table class="data-table" style="min-width:900px;">
+            <thead>
+                <tr>
+                    <th>Ticket ID</th>
+                    <th>User</th>
+                    <th>Subject</th>
+                    <th>Status</th>
+                    <th>Priority</th>
+                    <th>Assigned</th>
+                    <th>Last Update</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for ticket in page %}
+                <tr style="{% if ticket.unread_for_admin > 0 %}background:rgba(99,102,241,0.06);{% endif %}">
+                    <td>
+                        <a href="/truff-admin/support/{{ ticket.ticket_id }}/"
+                            style="font-family:monospace;font-weight:600;">
+                            {{ ticket.ticket_id }}
+                        </a>
+                        {% if ticket.unread_for_admin > 0 %}
+                        <span class="badge badge-danger" style="margin-left:4px;font-size:10px;">{{
+                            ticket.unread_for_admin }} new</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div style="font-weight:600;">{{ ticket.user.get_full_name|default:ticket.user.username }}</div>
+                        <div style="font-size:11px;color:#8b8fa3;">{{
+                            ticket.user.phone_number|default:ticket.user.email|default:"--" }}</div>
+                    </td>
+                    <td style="max-width:250px;">{{ ticket.subject }}</td>
+                    <td>
+                        {% if ticket.status == "open" %}
+                        <span class="badge badge-info">Open</span>
+                        {% elif ticket.status == "awaiting_reply" %}
+                        <span class="badge badge-warning">Awaiting Reply</span>
+                        {% elif ticket.status == "resolved" %}
+                        <span class="badge badge-success">Resolved</span>
+                        {% else %}
+                        <span class="badge badge-secondary">Closed</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if ticket.priority == "urgent" %}
+                        <span style="color:#ef4444;font-weight:700;">&#128308; Urgent</span>
+                        {% elif ticket.priority == "high" %}
+                        <span style="color:#f97316;font-weight:600;">&#128992; High</span>
+                        {% elif ticket.priority == "medium" %}
+                        <span style="color:#f59e0b;">&#128993; Medium</span>
+                        {% else %}
+                        <span style="color:#22c55e;">&#128994; Low</span>
+                        {% endif %}
+                    </td>
+                    <td style="font-size:12px;">{{ ticket.assigned_to.username|default:"Unassigned" }}</td>
+                    <td style="font-size:12px;color:#8b8fa3;white-space:nowrap;">{{ ticket.updated_at|timesince }} ago
+                    </td>
+                    <td><a href="/truff-admin/support/{{ ticket.ticket_id }}/" class="btn btn-outline btn-sm">View</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="8" style="text-align:center;color:#8b8fa3;padding:40px;">
+                        &#128172; No support tickets found
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if page.has_other_pages %}
+    <div class="pagination">
+        {% if page.has_previous %}
+        <a
+            href="?page={{ page.previous_page_number }}&q={{ search_query }}&status={{ status_filter }}&priority={{ priority_filter }}">&#8592;
+            Prev</a>
+        {% endif %}
+        <span class="active">{{ page.number }}</span>
+        {% if page.has_next %}
+        <a
+            href="?page={{ page.next_page_number }}&q={{ search_query }}&status={{ status_filter }}&priority={{ priority_filter }}">Next
+            &#8594;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

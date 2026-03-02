@@ -1,0 +1,70 @@
+{% extends "truff_admin/base.html" %}
+{% load truff_tags %}
+
+{% block title %}{% if mode == "create" %}New{% else %}Edit{% endif %} Promo Code — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="topbar">
+    <h1>{% if mode == "create" %}Create New{% else %}Edit{% endif %} Promo Code</h1>
+    <div class="topbar-actions"><a href="/truff-admin/promo-codes/" class="btn btn-outline btn-sm">&#8592; Back</a></div>
+</div>
+
+{% if error %}
+<div class="panel" style="background:#2e1a1a;border-left:4px solid #ef4444;padding:12px 20px;margin-bottom:16px;">
+    <span style="color:#ef4444;">&#10060; {{ error }}</span>
+</div>
+{% endif %}
+
+<div class="panel" style="max-width:600px;">
+    <form method="post" action="{% if mode == "create" %}/truff-admin/promo-codes/create/{% else %}/truff-admin/promo-codes/{{ promo.id }}/edit/{% endif %}">
+        {% csrf_token %}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+            <div>
+                <label style="color:#8b8fa3;font-size:12px;display:block;margin-bottom:4px;">Code *</label>
+                <input type="text" name="code" class="form-input" placeholder="SUMMER20" value="{{ promo.code|default:'' }}" required style="width:100%;font-family:monospace;text-transform:uppercase;">
+            </div>
+            <div>
+                <label style="color:#8b8fa3;font-size:12px;display:block;margin-bottom:4px;">Discount Type *</label>
+                <select name="discount_type" class="form-select" style="width:100%;">
+                    <option value="percentage" {% if promo.discount_type == "percentage" %}selected{% endif %}>Percentage (%)</option>
+                    <option value="fixed" {% if promo.discount_type == "fixed" %}selected{% endif %}>Fixed Amount (&#8377;)</option>
+                </select>
+            </div>
+            <div>
+                <label style="color:#8b8fa3;font-size:12px;display:block;margin-bottom:4px;">Discount Value *</label>
+                <input type="number" name="discount_value" class="form-input" value="{{ promo.discount_value|default:'0' }}" min="0" step="0.01" required style="width:100%;">
+            </div>
+            <div>
+                <label style="color:#8b8fa3;font-size:12px;display:block;margin-bottom:4px;">Min Order Amount (&#8377;)</label>
+                <input type="number" name="min_order_value" class="form-input" value="{{ promo.min_order_value|default:'0' }}" min="0" step="0.01" style="width:100%;">
+            </div>
+            <div>
+                <label style="color:#8b8fa3;font-size:12px;display:block;margin-bottom:4px;">Valid From</label>
+                <input type="date" name="valid_from" class="form-input" value="{{ promo.valid_from|date:'Y-m-d'|default:'' }}" style="width:100%;">
+            </div>
+            <div>
+                <label style="color:#8b8fa3;font-size:12px;display:block;margin-bottom:4px;">Valid Until</label>
+                <input type="date" name="valid_until" class="form-input" value="{{ promo.valid_until|date:'Y-m-d'|default:'' }}" style="width:100%;">
+            </div>
+            <div>
+                <label style="color:#8b8fa3;font-size:12px;display:block;margin-bottom:4px;">Max Uses</label>
+                <input type="number" name="max_uses" class="form-input" value="{{ promo.max_uses|default:'1' }}" min="1" style="width:100%;">
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding-top:20px;">
+                <input type="checkbox" name="is_active" id="is_active" {% if promo.is_active %}checked{% endif %}>
+                <label for="is_active" style="cursor:pointer;">Active</label>
+            </div>
+        </div>
+        {% if mode == "edit" %}
+        <div style="margin-bottom:16px;padding:12px;background:#1a1a2e;border-radius:6px;">
+            <div style="font-size:12px;color:#8b8fa3;">Current Usage</div>
+            <div style="font-size:18px;font-weight:700;">{{ promo.current_uses }} / {{ promo.max_uses }} uses</div>
+        </div>
+        {% endif %}
+        <div style="display:flex;gap:12px;">
+            <button type="submit" class="btn btn-primary">{% if mode == "create" %}&#43; Create Code{% else %}&#10003; Save Changes{% endif %}</button>
+            <a href="/truff-admin/promo-codes/" class="btn btn-outline">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

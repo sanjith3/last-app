@@ -547,7 +547,77 @@ class OwnerDetailView(TruffAdminRequiredMixin, View):
             'settlements': settlements,
             'pin_requests': pin_requests,
             'stats': stats,
+            'msg': request.GET.get('msg', ''),
         })
+
+    def post(self, request, owner_id):
+        """Handle admin actions: verify bank, suspend, mark settlement paid."""
+        owner = get_object_or_404(User, pk=owner_id, role='turf_owner')
+        action = request.POST.get('action')
+        msg = ''
+
+        if action == 'verify_bank':
+            try:
+                profile = owner.turf_owner_profile
+                profile.bank_verified = True
+                profile.save(update_fields=['bank_verified'])
+                log_admin_action(request, 'owner_bank_verified', 'TurfOwner', owner_id, {
+                    'username': owner.username,
+                })
+                msg = 'Bank account verified.'
+            except TurfOwner.DoesNotExist:
+                msg = 'Owner profile not found.'
+
+        elif action == 'unverify_bank':
+            try:
+                profile = owner.turf_owner_profile
+                profile.bank_verified = False
+                profile.save(update_fields=['bank_verified'])
+                log_admin_action(request, 'owner_bank_unverified', 'TurfOwner', owner_id, {
+                    'username': owner.username,
+                })
+                msg = 'Bank verification removed.'
+            except TurfOwner.DoesNotExist:
+                msg = 'Owner profile not found.'
+
+        elif action == 'suspend':
+            # Suspend all owner's turfs
+            reason = request.POST.get('reason', 'Suspended by admin')
+            turfs = Turf.objects.filter(owner=owner, status=TurfStatus.APPROVED)
+            for turf in turfs:
+                turf.suspend(reason=reason)
+            owner.is_active = False
+            owner.save(update_fields=['is_active'])
+            log_admin_action(request, 'owner_suspended', 'User', owner_id, {
+                'username': owner.username, 'reason': reason,
+                'turfs_suspended': turfs.count(),
+            })
+            msg = f'Owner suspended. {turfs.count()} turfs deactivated.'
+
+        elif action == 'reactivate':
+            owner.is_active = True
+            owner.save(update_fields=['is_active'])
+            log_admin_action(request, 'owner_reactivated', 'User', owner_id, {
+                'username': owner.username,
+            })
+            msg = 'Owner reactivated.'
+
+        elif action == 'mark_settlement_paid':
+            settlement_id = request.POST.get('settlement_id')
+            utr = request.POST.get('utr', '')
+            from finance.models import SettlementStatus
+            settlement = get_object_or_404(OwnerSettlement, pk=settlement_id, owner=owner)
+            settlement.status = SettlementStatus.COMPLETED
+            settlement.settled_at = timezone.now()
+            if utr:
+                settlement.razorpay_transfer_id = utr
+            settlement.save()
+            log_admin_action(request, 'settlement_marked_paid', 'OwnerSettlement', int(settlement_id), {
+                'owner': owner.username, 'amount': str(settlement.net_payout), 'utr': utr,
+            })
+            msg = f'Settlement #{settlement_id} marked as paid.'
+
+        return redirect(f'/truff-admin/owners/{owner_id}/?msg={msg}')
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -558,7 +628,11 @@ class UserListView(TruffAdminRequiredMixin, View):
     """List all registered customers with stats."""
 
     def get(self, request):
-        qs = User.objects.filter(role='user')
+        from django.utils import timezone as tz
+        from datetime import timedelta
+
+        # Base queryset — all non-admin users
+        qs = User.objects.exclude(role='admin')
 
         # Search
         search = request.GET.get('q', '')
@@ -571,12 +645,17 @@ class UserListView(TruffAdminRequiredMixin, View):
                 Q(phone_number__icontains=search)
             )
 
-        # Verified filter
-        verified = request.GET.get('verified', '')
-        if verified == 'yes':
-            qs = qs.filter(is_verified=True)
-        elif verified == 'no':
-            qs = qs.filter(is_verified=False)
+        # Role filter
+        role_filter = request.GET.get('role', '')
+        if role_filter:
+            qs = qs.filter(role=role_filter)
+
+        # Active/Blocked status filter
+        status_filter = request.GET.get('status', '')
+        if status_filter == 'active':
+            qs = qs.filter(is_active=True)
+        elif status_filter == 'blocked':
+            qs = qs.filter(is_active=False)
 
         # Date range
         date_from = request.GET.get('date_from', '')
@@ -614,30 +693,30 @@ class UserListView(TruffAdminRequiredMixin, View):
         page = paginator.get_page(request.GET.get('page', 1))
 
         # Summary stats
-        all_users = User.objects.filter(role='user')
-        total = all_users.count()
-        verified_count = all_users.filter(is_verified=True).count()
+        all_users = User.objects.exclude(role='admin')
+        month_ago = tz.now() - timedelta(days=30)
         summary = {
-            'total': total,
-            'verified': verified_count,
-            'unverified': total - verified_count,
-            'turf_owners': User.objects.filter(role='turf_owner').count(),
+            'total': all_users.count(),
+            'active': all_users.filter(is_active=True).count(),
+            'turf_owners': all_users.filter(role='turf_owner').count(),
+            'new_this_month': all_users.filter(created_at__gte=month_ago).count(),
         }
 
         return render(request, 'truff_admin/users_list.html', {
             'page': page,
             'search_query': search,
-            'verified_filter': verified,
+            'role_filter': role_filter,
+            'status_filter': status_filter,
             'date_from': date_from,
             'date_to': date_to,
             'current_sort': sort,
-            'total_users': total,
+            'total_users': summary['total'],
             'summary': summary,
         })
 
 
 class UserDetailView(TruffAdminRequiredMixin, View):
-    """Single user detail with booking/call history."""
+    """Single user detail with booking/call history + admin actions."""
 
     def get(self, request, user_id):
         user_obj = get_object_or_404(User, pk=user_id)
@@ -654,6 +733,12 @@ class UserDetailView(TruffAdminRequiredMixin, View):
             'booking', 'booking__turf', 'initiated_by'
         ).order_by('-started_at')[:20]
 
+        # Referral history
+        from users.models import Referral
+        referrals = Referral.objects.filter(
+            Q(referrer=user_obj) | Q(referee=user_obj)
+        ).select_related('referrer', 'referee').order_by('-created_at')[:20]
+
         # Stats
         all_bookings = Booking.objects.filter(user=user_obj)
         confirmed = all_bookings.filter(
@@ -669,12 +754,70 @@ class UserDetailView(TruffAdminRequiredMixin, View):
         stats['total_all'] = all_bookings.count()
         stats['total_calls'] = call_records.count()
 
+        # Success message from POST redirects
+        msg = request.GET.get('msg', '')
+
         return render(request, 'truff_admin/user_detail.html', {
             'user_obj': user_obj,
             'bookings': bookings,
             'call_records': call_records,
+            'referrals': referrals,
             'stats': stats,
+            'msg': msg,
         })
+
+    def post(self, request, user_id):
+        """Handle admin actions: verify, block, unblock, delete."""
+        user_obj = get_object_or_404(User, pk=user_id)
+        action = request.POST.get('action')
+        msg = ''
+
+        if action == 'verify':
+            user_obj.is_verified = True
+            user_obj.save(update_fields=['is_verified'])
+            log_admin_action(request, 'user_verified', 'User', user_id, {
+                'username': user_obj.username,
+            })
+            msg = 'User verified successfully.'
+
+        elif action == 'unverify':
+            user_obj.is_verified = False
+            user_obj.save(update_fields=['is_verified'])
+            log_admin_action(request, 'user_unverified', 'User', user_id, {
+                'username': user_obj.username,
+            })
+            msg = 'User verification removed.'
+
+        elif action == 'block':
+            user_obj.is_active = False
+            user_obj.save(update_fields=['is_active'])
+            log_admin_action(request, 'user_blocked', 'User', user_id, {
+                'username': user_obj.username,
+            })
+            msg = 'User blocked.'
+
+        elif action == 'unblock':
+            user_obj.is_active = True
+            user_obj.save(update_fields=['is_active'])
+            log_admin_action(request, 'user_unblocked', 'User', user_id, {
+                'username': user_obj.username,
+            })
+            msg = 'User unblocked.'
+
+        elif action == 'delete':
+            # Soft delete — deactivate and anonymize
+            user_obj.is_active = False
+            user_obj.email = f'deleted_{user_obj.pk}@deleted.trufspot.com'
+            user_obj.phone_number = ''
+            user_obj.first_name = 'Deleted'
+            user_obj.last_name = 'User'
+            user_obj.save()
+            log_admin_action(request, 'user_deleted', 'User', user_id, {
+                'username': user_obj.username,
+            })
+            msg = 'User soft-deleted (anonymized).'
+
+        return redirect(f'/truff-admin/users/{user_id}/?msg={msg}')
 
 
 class ExportUsersView(TruffAdminRequiredMixin, View):
@@ -711,6 +854,81 @@ class ExportUsersView(TruffAdminRequiredMixin, View):
 
         log_admin_action(request, 'export_users', 'User', 0)
         return streaming_csv_response('users_export.csv', header, rows())
+
+
+class UserBulkActionView(TruffAdminRequiredMixin, View):
+    """Bulk actions on selected users: verify, block, export CSV."""
+
+    def post(self, request):
+        import json
+        action = request.POST.get('action')
+        user_ids_raw = request.POST.get('user_ids', '[]')
+
+        try:
+            user_ids = json.loads(user_ids_raw)
+        except (json.JSONDecodeError, TypeError):
+            return JsonResponse({'error': 'Invalid user_ids'}, status=400)
+
+        if not user_ids:
+            return JsonResponse({'error': 'No users selected'}, status=400)
+
+        users = User.objects.filter(pk__in=user_ids)
+        processed = 0
+
+        if action == 'verify':
+            processed = users.update(is_verified=True)
+            for u in users:
+                log_admin_action(request, 'user_verified', 'User', u.pk, {
+                    'username': u.username, 'bulk': True,
+                })
+
+        elif action == 'block':
+            processed = users.update(is_active=False)
+            for u in users:
+                log_admin_action(request, 'user_blocked', 'User', u.pk, {
+                    'username': u.username, 'bulk': True,
+                })
+
+        elif action == 'unblock':
+            processed = users.update(is_active=True)
+            for u in users:
+                log_admin_action(request, 'user_unblocked', 'User', u.pk, {
+                    'username': u.username, 'bulk': True,
+                })
+
+        elif action == 'export':
+            # Export selected users as CSV
+            qs = users.annotate(
+                booking_count=Count('bookings', distinct=True),
+                total_spent=Sum(
+                    'bookings__final_price',
+                    filter=Q(
+                        bookings__booking_status__in=[
+                            BookingStatus.CONFIRMED, BookingStatus.COMPLETED,
+                        ]
+                    ),
+                ),
+            ).order_by('-created_at')
+            header = ['ID', 'Username', 'Name', 'Email', 'Phone', 'Verified', 'Active', 'Bookings', 'Spent', 'Joined']
+
+            def rows():
+                for u in qs:
+                    yield [
+                        u.id, u.username, u.get_full_name() or u.username,
+                        u.email or '', u.phone_number or '',
+                        'Yes' if u.is_verified else 'No',
+                        'Yes' if u.is_active else 'No',
+                        u.booking_count, float(u.total_spent or 0),
+                        str(u.created_at),
+                    ]
+
+            log_admin_action(request, 'export_users_selected', 'User', 0, {'count': len(user_ids)})
+            return streaming_csv_response('users_selected_export.csv', header, rows())
+
+        else:
+            return JsonResponse({'error': 'Invalid action'}, status=400)
+
+        return JsonResponse({'success': True, 'processed': processed, 'action': action})
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -765,7 +983,7 @@ class BookingListView(TruffAdminRequiredMixin, View):
 
 
 class BookingDetailView(TruffAdminRequiredMixin, View):
-    """Booking detail with ledger entries."""
+    """Booking detail with ledger entries + admin actions."""
 
     def get(self, request, booking_id):
         booking = get_object_or_404(
@@ -779,11 +997,60 @@ class BookingDetailView(TruffAdminRequiredMixin, View):
         except Payment.DoesNotExist:
             payment = None
 
+        # Call records for this booking
+        calls = CallRecord.objects.filter(booking=booking).order_by('-started_at')
+
         return render(request, 'truff_admin/booking_detail.html', {
             'booking': booking,
             'ledger_entries': ledger,
             'payment': payment,
+            'calls': calls,
+            'msg': request.GET.get('msg', ''),
         })
+
+    def post(self, request, booking_id):
+        """Handle admin actions: cancel, no-show, refund."""
+        booking = get_object_or_404(Booking, pk=booking_id)
+        action = request.POST.get('action')
+        msg = ''
+
+        if action == 'cancel':
+            reason = request.POST.get('reason', 'Cancelled by admin')
+            if booking.booking_status not in [BookingStatus.CANCELLED]:
+                booking.cancel(reason=reason, cancelled_by_admin=True)
+                log_admin_action(request, 'booking_cancelled', 'Booking', booking_id, {
+                    'reason': reason, 'user': booking.user.username,
+                    'turf': booking.turf.name, 'amount': str(booking.final_price),
+                })
+                msg = f'Booking #{booking_id} cancelled.'
+            else:
+                msg = 'Booking is already cancelled.'
+
+        elif action == 'no_show':
+            booking.booking_status = BookingStatus.COMPLETED
+            booking.cancellation_reason = 'No-show'
+            booking.save(update_fields=['booking_status', 'cancellation_reason'])
+            log_admin_action(request, 'booking_no_show', 'Booking', booking_id, {
+                'user': booking.user.username, 'turf': booking.turf.name,
+            })
+            msg = f'Booking #{booking_id} marked as no-show.'
+
+        elif action == 'refund':
+            # Mark payment as refunded
+            try:
+                payment = booking.payment
+                payment.status = 'refunded'
+                payment.save(update_fields=['status'])
+            except Payment.DoesNotExist:
+                pass
+            booking.payment_status = 'refunded'
+            booking.save(update_fields=['payment_status'])
+            log_admin_action(request, 'booking_refunded', 'Booking', booking_id, {
+                'user': booking.user.username, 'amount': str(booking.final_price),
+            })
+            msg = f'Booking #{booking_id} marked as refunded.'
+
+        return redirect(f'/truff-admin/bookings/{booking_id}/?msg={msg}')
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1373,3 +1640,347 @@ class CallConnectView(TruffAdminRequiredMixin, View):
         # This is where Twilio/Exotel integration goes.
 
         return JsonResponse({'success': True, 'call_id': call_id, 'status': 'connected'})
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TURF EDIT
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TurfEditView(TruffAdminRequiredMixin, View):
+    """Edit turf details form."""
+
+    def get(self, request, turf_id):
+        turf = get_object_or_404(
+            Turf.objects.select_related('owner').prefetch_related('sports', 'amenities'),
+            pk=turf_id,
+        )
+        from turfs.models import Sport, Amenity
+        all_sports = Sport.objects.all()
+        all_amenities = Amenity.objects.all()
+        return render(request, 'truff_admin/turf_edit.html', {
+            'turf': turf,
+            'all_sports': all_sports,
+            'all_amenities': all_amenities,
+        })
+
+    def post(self, request, turf_id):
+        turf = get_object_or_404(Turf, pk=turf_id)
+        from turfs.models import Sport, Amenity
+        turf.name = request.POST.get('name', turf.name)
+        turf.description = request.POST.get('description', turf.description)
+        turf.address = request.POST.get('address', turf.address)
+        turf.city = request.POST.get('city', turf.city)
+        turf.state = request.POST.get('state', turf.state)
+        price = request.POST.get('price_per_hour')
+        if price:
+            try:
+                turf.price_per_hour = Decimal(price)
+            except Exception:
+                pass
+        max_players = request.POST.get('max_players')
+        if max_players:
+            try:
+                turf.max_players = int(max_players)
+            except Exception:
+                pass
+        turf.save()
+        sport_ids = request.POST.getlist('sports')
+        if sport_ids:
+            turf.sports.set(Sport.objects.filter(pk__in=sport_ids))
+        amenity_ids = request.POST.getlist('amenities')
+        turf.amenities.set(Amenity.objects.filter(pk__in=amenity_ids))
+        log_admin_action(request, 'turf_edited', 'Turf', turf_id, {'turf_name': turf.name})
+        return redirect(f'/truff-admin/turfs/{turf_id}/?msg=Turf+updated+successfully.')
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# AUDIT LOG EXPORT
+# ═══════════════════════════════════════════════════════════════════════════
+
+class ExportAuditLogView(TruffAdminRequiredMixin, View):
+    """CSV export of audit log with current filters."""
+
+    def get(self, request):
+        import json
+        qs = AdminAuditLog.objects.all()
+        search = request.GET.get('q', '')
+        if search:
+            qs = qs.filter(
+                Q(actor_name__icontains=search) | Q(action__icontains=search) | Q(target_model__icontains=search)
+            )
+        if request.GET.get('action'):
+            qs = qs.filter(action=request.GET['action'])
+        if request.GET.get('model'):
+            qs = qs.filter(target_model=request.GET['model'])
+        if request.GET.get('date_from'):
+            qs = qs.filter(created_at__date__gte=request.GET['date_from'])
+        if request.GET.get('date_to'):
+            qs = qs.filter(created_at__date__lte=request.GET['date_to'])
+
+        header = ['ID', 'Actor', 'Action', 'Target Model', 'Target ID', 'Details', 'IP', 'Timestamp']
+
+        def rows():
+            for log in qs.order_by('-created_at').iterator():
+                yield [
+                    log.id, log.actor_name, log.action,
+                    log.target_model, log.target_id,
+                    json.dumps(log.details) if log.details else '',
+                    log.ip_address or '', str(log.created_at),
+                ]
+
+        log_admin_action(request, 'export_audit_log', 'AdminAuditLog', 0)
+        return streaming_csv_response('audit_log_export.csv', header, rows())
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PROMO CODE MANAGEMENT
+# ═══════════════════════════════════════════════════════════════════════════
+
+class PromoCodeListView(TruffAdminRequiredMixin, View):
+    """List promo codes with filters."""
+
+    def get(self, request):
+        from users.models import PromoCode
+        qs = PromoCode.objects.all()
+        search = request.GET.get('q', '')
+        if search:
+            qs = qs.filter(code__icontains=search)
+        status_filter = request.GET.get('status', '')
+        if status_filter == 'active':
+            qs = qs.filter(is_active=True)
+        elif status_filter == 'inactive':
+            qs = qs.filter(is_active=False)
+        paginator = Paginator(qs.order_by('-created_at'), 25)
+        page = paginator.get_page(request.GET.get('page', 1))
+        from users.models import PromoCode as PC
+        total = PC.objects.count()
+        active = PC.objects.filter(is_active=True).count()
+        summary = {
+            'total': total,
+            'active': active,
+            'inactive': total - active,
+            'total_uses': 0,  # Usage tracking not yet in model
+        }
+        return render(request, 'truff_admin/promo_codes.html', {
+            'page': page, 'search_query': search,
+            'status_filter': status_filter, 'summary': summary,
+        })
+
+
+class PromoCodeCreateView(TruffAdminRequiredMixin, View):
+    """Create a new promo code."""
+
+    def get(self, request):
+        return render(request, 'truff_admin/promo_code_form.html', {'mode': 'create'})
+
+    def post(self, request):
+        from users.models import PromoCode
+        code = request.POST.get('code', '').strip().upper()
+        if not code:
+            return render(request, 'truff_admin/promo_code_form.html', {'mode': 'create', 'error': 'Code is required.'})
+        if PromoCode.objects.filter(code=code).exists():
+            return render(request, 'truff_admin/promo_code_form.html', {
+                'mode': 'create', 'error': f'Code "{code}" already exists.',
+            })
+        try:
+            promo = PromoCode.objects.create(
+                code=code,
+                discount_type=request.POST.get('discount_type', 'percentage'),
+                discount_value=Decimal(request.POST.get('discount_value', '0')),
+                min_order_value=Decimal(request.POST.get('min_order_value', '0')),
+                valid_from=request.POST.get('valid_from') or timezone.now(),
+                valid_until=request.POST.get('valid_until') or (timezone.now() + timedelta(days=365)),
+                max_uses=int(request.POST.get('max_uses', '1')),
+                is_active=request.POST.get('is_active') == 'on',
+            )
+            log_admin_action(request, 'promo_code_created', 'PromoCode', promo.pk, {'code': code})
+        except Exception as e:
+            return render(request, 'truff_admin/promo_code_form.html', {'mode': 'create', 'error': str(e)})
+        return redirect('/truff-admin/promo-codes/')
+
+
+class PromoCodeEditView(TruffAdminRequiredMixin, View):
+    """Edit an existing promo code."""
+
+    def get(self, request, code_id):
+        from users.models import PromoCode
+        promo = get_object_or_404(PromoCode, pk=code_id)
+        return render(request, 'truff_admin/promo_code_form.html', {'mode': 'edit', 'promo': promo})
+
+    def post(self, request, code_id):
+        from users.models import PromoCode
+        promo = get_object_or_404(PromoCode, pk=code_id)
+        promo.code = request.POST.get('code', promo.code).strip().upper()
+        promo.discount_type = request.POST.get('discount_type', promo.discount_type)
+        try:
+            promo.discount_value = Decimal(request.POST.get('discount_value', str(promo.discount_value)))
+            promo.min_order_amount = Decimal(request.POST.get('min_order_amount', str(promo.min_order_value)))
+            promo.max_uses = int(request.POST.get('max_uses', str(promo.max_uses)))
+        except Exception:
+            pass
+        promo.valid_from = request.POST.get('valid_from') or promo.valid_from
+        promo.valid_until = request.POST.get('valid_until') or promo.valid_until
+        promo.is_active = request.POST.get('is_active') == 'on'
+        promo.save()
+        log_admin_action(request, 'promo_code_updated', 'PromoCode', promo.pk, {'code': promo.code})
+        return redirect('/truff-admin/promo-codes/')
+
+
+class PromoCodeDeleteView(TruffAdminRequiredMixin, View):
+    """Delete a promo code."""
+
+    def post(self, request, code_id):
+        from users.models import PromoCode
+        promo = get_object_or_404(PromoCode, pk=code_id)
+        code = promo.code
+        promo.delete()
+        log_admin_action(request, 'promo_code_deleted', 'PromoCode', code_id, {'code': code})
+        return redirect('/truff-admin/promo-codes/')
+
+
+# =============================================================================
+# SUPPORT CHAT — ADMIN PANEL VIEWS  (appended)
+# =============================================================================
+
+class SupportDashboardView(TruffAdminRequiredMixin, View):
+    """Support ticket dashboard — list all tickets with filters and stats."""
+
+    def get(self, request):
+        from support.models import SupportTicket
+        from django.utils import timezone as tz
+        from datetime import timedelta
+
+        qs = SupportTicket.objects.select_related('user', 'assigned_to').all()
+
+        # Search
+        q = request.GET.get('q', '')
+        if q:
+            qs = qs.filter(
+                Q(ticket_id__icontains=q) |
+                Q(user__username__icontains=q) |
+                Q(user__first_name__icontains=q) |
+                Q(subject__icontains=q)
+            )
+
+        # Status filter
+        status_filter = request.GET.get('status', '')
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+
+        # Priority filter
+        priority_filter = request.GET.get('priority', '')
+        if priority_filter:
+            qs = qs.filter(priority=priority_filter)
+
+        paginator = Paginator(qs, 25)
+        page = paginator.get_page(request.GET.get('page', 1))
+
+        # Stats
+        today_start = tz.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        summary = {
+            'open': SupportTicket.objects.filter(status='open').count(),
+            'awaiting': SupportTicket.objects.filter(status='awaiting_reply').count(),
+            'resolved_today': SupportTicket.objects.filter(
+                status='resolved', resolved_at__gte=today_start
+            ).count(),
+            'total': SupportTicket.objects.count(),
+            'unread': sum(t.unread_for_admin for t in SupportTicket.objects.filter(status__in=['open', 'awaiting_reply'])),
+        }
+
+        return render(request, 'truff_admin/support_dashboard.html', {
+            'page': page,
+            'search_query': q,
+            'status_filter': status_filter,
+            'priority_filter': priority_filter,
+            'summary': summary,
+        })
+
+
+class SupportTicketDetailView(TruffAdminRequiredMixin, View):
+    """View and respond to a single support ticket."""
+
+    def get(self, request, ticket_id):
+        from support.models import SupportTicket
+
+        ticket = get_object_or_404(SupportTicket, ticket_id=ticket_id)
+
+        # JSON poll endpoint — called by frontend JS every 12s
+        if request.GET.get('poll'):
+            after = request.GET.get('after')
+            qs = ticket.messages.all()
+            if after:
+                try:
+                    qs = qs.filter(created_at__gt=after)
+                except Exception:
+                    pass
+            new_count = qs.exclude(sender=request.user).count()
+            return JsonResponse({'new_count': new_count})
+
+        # Mark user messages as read when admin views ticket
+        ticket.messages.filter(is_read=False).exclude(
+            sender=request.user
+        ).update(is_read=True)
+
+        return render(request, 'truff_admin/support_ticket.html', {
+            'ticket': ticket,
+            'messages': ticket.messages.select_related('sender').all(),
+        })
+
+    def post(self, request, ticket_id):
+        from support.models import SupportTicket, SupportMessage
+
+        ticket = get_object_or_404(SupportTicket, ticket_id=ticket_id)
+        action = request.POST.get('action', 'reply')
+
+        if action == 'reply':
+            text = request.POST.get('message', '').strip()
+            if text:
+                SupportMessage.objects.create(
+                    ticket=ticket,
+                    sender=request.user,
+                    message=text,
+                )
+                # Update status → awaiting_reply (waiting for user)
+                if ticket.status == 'open':
+                    ticket.status = 'awaiting_reply'
+                    ticket.save(update_fields=['status', 'updated_at'])
+                log_admin_action(
+                    request, 'support_reply', 'SupportTicket', ticket.pk,
+                    {'ticket_id': ticket_id, 'message_len': len(text)},
+                )
+
+        elif action == 'assign':
+            ticket.assigned_to = request.user
+            ticket.save(update_fields=['assigned_to', 'updated_at'])
+            log_admin_action(request, 'support_assigned', 'SupportTicket', ticket.pk, {'ticket_id': ticket_id})
+
+        elif action == 'resolve':
+            from django.utils import timezone as tz
+            ticket.status = 'resolved'
+            ticket.resolved_at = tz.now()
+            ticket.save(update_fields=['status', 'resolved_at', 'updated_at'])
+            log_admin_action(request, 'support_resolved', 'SupportTicket', ticket.pk, {'ticket_id': ticket_id})
+
+        elif action == 'close':
+            ticket.status = 'closed'
+            ticket.save(update_fields=['status', 'updated_at'])
+            log_admin_action(request, 'support_closed', 'SupportTicket', ticket.pk, {'ticket_id': ticket_id})
+
+        elif action == 'reopen':
+            ticket.status = 'open'
+            ticket.resolved_at = None
+            ticket.save(update_fields=['status', 'resolved_at', 'updated_at'])
+            log_admin_action(request, 'support_reopened', 'SupportTicket', ticket.pk, {'ticket_id': ticket_id})
+
+        return redirect(f'/truff-admin/support/{ticket_id}/')
+
+
+class SupportUnreadCountView(TruffAdminRequiredMixin, View):
+    """JSON endpoint — unread ticket count for sidebar badge polling."""
+
+    def get(self, request):
+        from support.models import SupportTicket
+        count = sum(
+            t.unread_for_admin
+            for t in SupportTicket.objects.filter(status__in=['open', 'awaiting_reply'])
+        )
+        return JsonResponse({'unread': count})

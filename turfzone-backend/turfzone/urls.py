@@ -19,6 +19,9 @@ def health_check(request):
 
 
 urlpatterns = [
+    # Landing page at root
+    path('', TemplateView.as_view(template_name='index.html'), name='landing'),
+
     path('admin/', admin.site.urls),
     path('api/health/', health_check),
     path('api/users/', include('users.urls')),
@@ -27,11 +30,13 @@ urlpatterns = [
     path('api/finance/', include('finance.urls')),
     path('api/payments/', include('payments.urls')),
     path('api/growth/', include('growth.urls')),
+    path('api/support/', include('support.urls')),
     path('truff-admin/', include('truff_admin_panel.urls')),
 
     # Legal pages (served as standalone HTML)
     path('legal/terms/', TemplateView.as_view(template_name='legal/terms.html'), name='legal-terms'),
     path('legal/privacy/', TemplateView.as_view(template_name='legal/privacy.html'), name='legal-privacy'),
+    path('legal/cancellation/', TemplateView.as_view(template_name='legal/cancellation.html'), name='legal-cancellation'),
     path('legal/owner-agreement/', TemplateView.as_view(template_name='legal/owner_agreement.html'), name='legal-owner-agreement'),
 ]
 

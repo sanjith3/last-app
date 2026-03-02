@@ -1,0 +1,129 @@
+{% extends "truff_admin/base.html" %}
+{% load truff_tags %}
+
+{% block title %}Promo Codes — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="topbar">
+    <h1>Promo Codes</h1>
+    <div class="topbar-actions">
+        <a href="/truff-admin/promo-codes/create/" class="btn btn-primary btn-sm">&#43; New Code</a>
+    </div>
+</div>
+
+<!-- Stats -->
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-label">Total Codes</div>
+        <div class="kpi-value">{{ summary.total }}</div>
+    </div>
+    <div class="kpi-card accent">
+        <div class="kpi-label">Active</div>
+        <div class="kpi-value">{{ summary.active }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Inactive</div>
+        <div class="kpi-value">{{ summary.inactive }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Total Uses</div>
+        <div class="kpi-value" style="color:#22c55e;">{{ summary.total_uses }}</div>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="filter-bar">
+    <form method="get" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;width:100%;">
+        <input type="text" name="q" class="form-input" placeholder="Search code..." value="{{ search_query }}"
+            style="width:200px;">
+        <select name="status" class="form-select">
+            <option value="">All Status</option>
+            <option value="active" {% if status_filter == "active" %}selected{% endif %}>Active</option>
+            <option value="inactive" {% if status_filter == "inactive" %}selected{% endif %}>Inactive</option>
+        </select>
+        <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+        <a href="/truff-admin/promo-codes/" class="btn btn-outline btn-sm">Reset</a>
+    </form>
+</div>
+
+<div class="panel">
+    <div style="overflow-x:auto;">
+        <table class="data-table" style="min-width:900px;">
+            <thead>
+                <tr>
+                    <th>Code</th>
+                    <th>Type</th>
+                    <th>Value</th>
+                    <th>Min Order</th>
+                    <th>Valid From</th>
+                    <th>Valid Until</th>
+                    <th style="text-align:center;">Usage</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for promo in page %}
+                <tr>
+                    <td><strong style="font-family:monospace;color:var(--accent);">{{ promo.code }}</strong></td>
+                    <td>{{ promo.discount_type }}</td>
+                    <td>
+                        {% if promo.discount_type == 'percentage' %}
+                        {{ promo.discount_value }}%
+                        {% else %}
+                        ₹{{ promo.discount_value }}
+                        {% endif %}
+                    </td>
+                    <td>₹{{ promo.min_order_value }}</td>
+                    <td style="font-size:12px;white-space:nowrap;">{{ promo.valid_from|date:"d M Y"|default:"-" }}</td>
+                    <td style="font-size:12px;white-space:nowrap;">{{ promo.valid_until|date:"d M Y"|default:"-" }}</td>
+                    <td style="text-align:center;color:#8b8fa3;font-size:13px;">&#8212;</td>
+                    <td>
+                        {% if promo.is_active %}
+                        <span class="badge badge-success">Active</span>
+                        {% else %}
+                        <span class="badge badge-secondary">Inactive</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div style="display:flex;gap:6px;">
+                            <a href="/truff-admin/promo-codes/{{ promo.id }}/edit/"
+                                class="btn btn-outline btn-sm">Edit</a>
+                            <form method="post" action="/truff-admin/promo-codes/{{ promo.id }}/delete/"
+                                style="display:inline;">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm"
+                                    style="background:#ef444420;color:#ef4444;border:1px solid #ef4444;"
+                                    onclick="return confirm('Delete promo code {{ promo.code }}?')">Delete</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="10" style="text-align:center;color:#8b8fa3;">No promo codes found</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if page.has_other_pages %}
+    <div class="pagination">
+        {% if page.has_previous %}
+        <a href="?page={{ page.previous_page_number }}&q={{ search_query }}&status={{ status_filter }}">← Prev</a>
+        {% endif %}
+        {% for num in page.paginator.page_range %}
+        {% if page.number == num %}
+        <span class="active">{{ num }}</span>
+        {% elif num > page.number|add:"-3" and num < page.number|add:"3" %} <a
+            href="?page={{ num }}&q={{ search_query }}&status={{ status_filter }}">{{ num }}</a>
+            {% endif %}
+            {% endfor %}
+            {% if page.has_next %}
+            <a href="?page={{ page.next_page_number }}&q={{ search_query }}&status={{ status_filter }}">Next →</a>
+            {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

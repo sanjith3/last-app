@@ -1,0 +1,180 @@
+{% extends "truff_admin/base.html" %}
+{% load truff_tags %}
+
+{% block title %}{{ ticket.ticket_id }} — Support{% endblock %}
+
+{% block content %}
+<div class="topbar">
+    <h1>
+        {{ ticket.ticket_id }}
+        &nbsp;
+        {% if ticket.status == "open" %}<span class="badge badge-info" style="font-size:12px;">Open</span>
+        {% elif ticket.status == "awaiting_reply" %}<span class="badge badge-warning" style="font-size:12px;">Awaiting
+            Reply</span>
+        {% elif ticket.status == "resolved" %}<span class="badge badge-success" style="font-size:12px;">Resolved</span>
+        {% else %}<span class="badge badge-secondary" style="font-size:12px;">Closed</span>
+        {% endif %}
+        &nbsp;
+        {% if ticket.priority == "urgent" %}<span style="color:#ef4444;font-size:13px;font-weight:700;">&#128308;
+            Urgent</span>
+        {% elif ticket.priority == "high" %}<span style="color:#f97316;font-size:13px;">&#128992; High</span>
+        {% elif ticket.priority == "medium" %}<span style="color:#f59e0b;font-size:13px;">&#128993; Medium</span>
+        {% else %}<span style="color:#22c55e;font-size:13px;">&#128994; Low</span>
+        {% endif %}
+    </h1>
+    <div class="topbar-actions">
+        <a href="/truff-admin/support/" class="btn btn-outline btn-sm">&#8592; All Tickets</a>
+    </div>
+</div>
+
+<!-- Ticket Meta -->
+<div class="panel"
+    style="padding:16px 20px;margin-bottom:0;border-bottom:1px solid #2a2a3e;border-radius:12px 12px 0 0;">
+    <div style="display:flex;gap:32px;flex-wrap:wrap;align-items:center;">
+        <div>
+            <span style="color:#8b8fa3;font-size:12px;">User</span><br>
+            <strong>{{ ticket.user.get_full_name|default:ticket.user.username }}</strong>
+            <span style="color:#8b8fa3;font-size:12px;margin-left:8px;">{{
+                ticket.user.phone_number|default:ticket.user.email }}</span>
+        </div>
+        <div>
+            <span style="color:#8b8fa3;font-size:12px;">Subject</span><br>
+            <strong>{{ ticket.subject }}</strong>
+        </div>
+        <div>
+            <span style="color:#8b8fa3;font-size:12px;">Opened</span><br>
+            <span style="font-size:13px;">{{ ticket.created_at|date:"d M Y H:i" }}</span>
+        </div>
+        <div>
+            <span style="color:#8b8fa3;font-size:12px;">Assigned To</span><br>
+            <span style="font-size:13px;">{{ ticket.assigned_to.username|default:"Unassigned" }}</span>
+        </div>
+        {% if ticket.resolved_at %}
+        <div>
+            <span style="color:#8b8fa3;font-size:12px;">Resolved At</span><br>
+            <span style="font-size:13px;color:#22c55e;">{{ ticket.resolved_at|date:"d M Y H:i" }}</span>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Action Buttons -->
+<div class="panel"
+    style="padding:12px 20px;margin-bottom:0;border-top:none;border-radius:0;border-top:1px solid #2a2a3e;">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        {% if ticket.assigned_to != request.user %}
+        <form method="post" action="/truff-admin/support/{{ ticket.ticket_id }}/" style="margin:0;">
+            {% csrf_token %}<input type="hidden" name="action" value="assign">
+            <button type="submit" class="btn btn-outline btn-sm">&#128100; Assign to Me</button>
+        </form>
+        {% endif %}
+        {% if ticket.status != "resolved" and ticket.status != "closed" %}
+        <form method="post" action="/truff-admin/support/{{ ticket.ticket_id }}/" style="margin:0;">
+            {% csrf_token %}<input type="hidden" name="action" value="resolve">
+            <button type="submit" class="btn btn-primary btn-sm" style="background:#22c55e;">&#10003; Mark
+                Resolved</button>
+        </form>
+        <form method="post" action="/truff-admin/support/{{ ticket.ticket_id }}/" style="margin:0;">
+            {% csrf_token %}<input type="hidden" name="action" value="close">
+            <button type="submit" class="btn btn-outline btn-sm" style="color:#8b8fa3;">&#10006; Close Ticket</button>
+        </form>
+        {% else %}
+        <form method="post" action="/truff-admin/support/{{ ticket.ticket_id }}/" style="margin:0;">
+            {% csrf_token %}<input type="hidden" name="action" value="reopen">
+            <button type="submit" class="btn btn-outline btn-sm">&#8635; Reopen</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Chat History -->
+<div class="panel" id="chat-container"
+    style="border-radius:0;border-top:none;min-height:300px;max-height:500px;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px;">
+    {% for msg in messages %}
+    {% with is_admin=msg.sender.role %}
+    <div
+        style="display:flex;flex-direction:{% if is_admin == 'admin' %}row-reverse{% else %}row{% endif %};gap:10px;align-items:flex-end;">
+        <!-- Avatar -->
+        <div
+            style="width:32px;height:32px;border-radius:50%;background:{% if is_admin == 'admin' %}#6366f1{% else %}#1a2a3e{% endif %};display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;">
+            {% if is_admin == "admin" %}&#128100;{% else %}{{ msg.sender.username|first|upper }}{% endif %}
+        </div>
+        <!-- Bubble -->
+        <div style="max-width:70%;">
+            <div
+                style="font-size:11px;color:#8b8fa3;margin-bottom:3px;{% if is_admin == 'admin' %}text-align:right;{% endif %}">
+                {% if is_admin == "admin" %}&#128100; Admin ({{ msg.sender.username }}){% else %}&#128172; {{
+                msg.sender.get_full_name|default:msg.sender.username }}{% endif %}
+                &nbsp;&bull;&nbsp;{{ msg.created_at|date:"d M Y H:i" }}
+                {% if not msg.is_read and is_admin != "admin" %}
+                <span style="color:#ef4444;font-size:10px;margin-left:4px;">&#9679; unread</span>
+                {% endif %}
+            </div>
+            <div
+                style="padding:10px 14px;border-radius:{% if is_admin == 'admin' %}12px 12px 2px 12px{% else %}12px 12px 12px 2px{% endif %};background:{% if is_admin == 'admin' %}#6366f1{% else %}#1a1a2e{% endif %};color:#f5f5f5;font-size:14px;line-height:1.5;word-break:break-word;">
+                {{ msg.message }}
+            </div>
+            {% if msg.attachment %}
+            <div style="margin-top:6px;{% if is_admin == 'admin' %}text-align:right;{% endif %}">
+                <a href="{{ msg.attachment.url }}" target="_blank" style="color:#6366f1;font-size:12px;">&#128206; View
+                    Attachment</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endwith %}
+    {% empty %}
+    <div style="text-align:center;color:#8b8fa3;padding:40px;">No messages yet.</div>
+    {% endfor %}
+</div>
+
+<!-- Reply Box -->
+{% if ticket.status != "closed" %}
+<div class="panel" style="border-radius:0 0 12px 12px;border-top:1px solid #2a2a3e;padding:16px 20px;">
+    <form method="post" action="/truff-admin/support/{{ ticket.ticket_id }}/" id="reply-form">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="reply">
+        <div style="display:flex;gap:10px;align-items:flex-end;">
+            <textarea name="message" id="reply-text" class="form-input" placeholder="Type your reply..." rows="3"
+                style="flex:1;resize:vertical;min-height:70px;font-size:14px;" required></textarea>
+            <button type="submit" class="btn btn-primary" style="height:70px;padding:0 20px;white-space:nowrap;">
+                &#9658; Send
+            </button>
+        </div>
+    </form>
+</div>
+{% endif %}
+
+<script>
+    // Auto-scroll chat to bottom on load
+    (function () {
+        var chat = document.getElementById('chat-container');
+        if (chat) chat.scrollTop = chat.scrollHeight;
+    })();
+
+    // Ctrl+Enter to send (guard: only when reply box exists)
+    var replyText = document.getElementById('reply-text');
+    if (replyText) {
+        replyText.addEventListener('keydown', function (e) {
+            if (e.ctrlKey && e.key === 'Enter') {
+                document.getElementById('reply-form').submit();
+            }
+        });
+    }
+
+    // Poll for new user messages every 12 seconds → reload if any
+    var lastCheck = new Date().toISOString();
+    function pollMessages() {
+        fetch('/truff-admin/support/{{ ticket.ticket_id }}/?poll=1&after=' + encodeURIComponent(lastCheck))
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                if (data && data.new_count > 0) {
+                    window.location.reload();
+                }
+                lastCheck = new Date().toISOString();
+            })
+            .catch(function () { });
+    }
+    setInterval(pollMessages, 12000);
+</script>
+{% endblock %}

@@ -1,0 +1,91 @@
+{% extends "truff_admin/base.html" %}
+{% load truff_tags %}
+
+{% block title %}Edit Turf #{{ turf.id }} — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="topbar">
+    <h1>Edit Turf: {{ turf.name }}</h1>
+    <div class="topbar-actions">
+        <a href="/truff-admin/turfs/{{ turf.id }}/" class="btn btn-outline btn-sm">&#8592; Back to Detail</a>
+    </div>
+</div>
+
+<div class="panel" style="max-width:800px;">
+    <div class="panel-title">Edit Turf Details</div>
+    <form method="post" action="/truff-admin/turfs/{{ turf.id }}/edit/">
+        {% csrf_token %}
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+            <div>
+                <label style="color:#8b8fa3;font-size:12px;display:block;margin-bottom:4px;">Turf Name</label>
+                <input type="text" name="name" class="form-input" value="{{ turf.name }}" required style="width:100%;">
+            </div>
+            <div>
+                <label style="color:#8b8fa3;font-size:12px;display:block;margin-bottom:4px;">City</label>
+                <input type="text" name="city" class="form-input" value="{{ turf.city|default:'' }}"
+                    style="width:100%;">
+            </div>
+            <div>
+                <label style="color:#8b8fa3;font-size:12px;display:block;margin-bottom:4px;">State</label>
+                <input type="text" name="state" class="form-input" value="{{ turf.state|default:'' }}"
+                    style="width:100%;">
+            </div>
+            <div>
+                <label style="color:#8b8fa3;font-size:12px;display:block;margin-bottom:4px;">Price Per Hour (₹)</label>
+                <input type="number" name="price_per_hour" class="form-input" value="{{ turf.price_per_hour }}" min="0"
+                    step="0.01" style="width:100%;">
+            </div>
+            <div>
+                <label style="color:#8b8fa3;font-size:12px;display:block;margin-bottom:4px;">Max Players</label>
+                <input type="number" name="max_players" class="form-input" value="{{ turf.max_players|default:'' }}"
+                    min="1" style="width:100%;">
+            </div>
+        </div>
+
+        <div style="margin-bottom:16px;">
+            <label style="color:#8b8fa3;font-size:12px;display:block;margin-bottom:4px;">Address</label>
+            <input type="text" name="address" class="form-input" value="{{ turf.address|default:'' }}"
+                style="width:100%;">
+        </div>
+
+        <div style="margin-bottom:16px;">
+            <label style="color:#8b8fa3;font-size:12px;display:block;margin-bottom:4px;">Description</label>
+            <textarea name="description" class="form-input" rows="4"
+                style="width:100%;">{{ turf.description|default:'' }}</textarea>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+            <div>
+                <label style="color:#8b8fa3;font-size:12px;display:block;margin-bottom:8px;">Sports</label>
+                <div style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto;">
+                    {% for sport in all_sports %}
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" name="sports" value="{{ sport.id }}" {% if sport in turf.sports.all
+                            %}checked{% endif %}>
+                        <span>{{ sport.name }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+            <div>
+                <label style="color:#8b8fa3;font-size:12px;display:block;margin-bottom:8px;">Amenities</label>
+                <div style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto;">
+                    {% for amenity in all_amenities %}
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" name="amenities" value="{{ amenity.id }}" {% if amenity in
+                            turf.amenities.all %}checked{% endif %}>
+                        <span>{{ amenity.name }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <div style="display:flex;gap:12px;">
+            <button type="submit" class="btn btn-primary">&#10003; Save Changes</button>
+            <a href="/truff-admin/turfs/{{ turf.id }}/" class="btn btn-outline">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

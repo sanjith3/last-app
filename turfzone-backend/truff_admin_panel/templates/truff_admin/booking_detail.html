@@ -5,93 +5,129 @@
 
 {% block content %}
 <div class="topbar">
-    <h1>Booking #{{ booking.id }}</h1>
-    <div class="topbar-actions">
-        <a href="/truff-admin/bookings/" class="btn btn-outline btn-sm">← Back</a>
-    </div>
+    <h1>Booking #{{ booking.id }} <span class="badge {{ booking.booking_status|status_badge }}" style="font-size:13px;margin-left:8px;">{{ booking.booking_status }}</span></h1>
+    <div class="topbar-actions"><a href="/truff-admin/bookings/" class="btn btn-outline btn-sm">&#8592; Back</a></div>
 </div>
 
-<!-- Details -->
-<div class="panel">
-    <div class="panel-title">Booking Details</div>
-    <div class="detail-grid">
-        <div class="detail-item"><label>User</label><span>{{ booking.user.username }}</span></div>
-        <div class="detail-item"><label>Turf</label><span><a href="/truff-admin/turfs/{{ booking.turf.id }}/">{{ booking.turf.name }}</a></span></div>
-        <div class="detail-item"><label>Owner</label><span><a href="/truff-admin/owners/{{ booking.turf.owner.id }}/">{{ booking.turf.owner.username }}</a></span></div>
-        <div class="detail-item"><label>Date</label><span>{{ booking.booking_date }}</span></div>
-        <div class="detail-item"><label>Time</label><span>{{ booking.start_time|time:"H:i" }} – {{ booking.end_time|time:"H:i" }}</span></div>
-        <div class="detail-item"><label>Booking Status</label><span
-                class="badge {{ booking.booking_status|status_badge }}">{{ booking.booking_status }}</span></div>
-        <div class="detail-item"><label>Payment Status</label><span
-                class="badge {{ booking.payment_status|status_badge }}">{{ booking.payment_status }}</span></div>
-    </div>
-</div>
-
-<!-- Financials -->
-<div class="panel">
-    <div class="panel-title">Financial Breakdown</div>
-    <div class="detail-grid">
-        <div class="detail-item"><label>Price/Hour</label><span>₹{{ booking.price_per_hour }}</span></div>
-        <div class="detail-item"><label>Total Price</label><span>₹{{ booking.total_price }}</span></div>
-        <div class="detail-item"><label>Discount</label><span>₹{{ booking.discount }}</span></div>
-        <div class="detail-item"><label>Final Price</label><span style="font-weight:700;color:var(--accent);">₹{{ booking.final_price }}</span></div>
-        <div class="detail-item"><label>GST Amount</label><span>₹{{ booking.gst_amount }}</span></div>
-        <div class="detail-item"><label>Commission</label><span>₹{{ booking.commission }}</span></div>
-        <div class="detail-item"><label>Platform Fee</label><span>₹{{ booking.platform_fee }}</span></div>
-        <div class="detail-item"><label>GST on Platform Fee</label><span>₹{{ booking.gst_on_platform_fee }}</span></div>
-        <div class="detail-item"><label>Owner Payout</label><span style="font-weight:700;">₹{{ booking.owner_payout }}</span></div>
-        <div class="detail-item"><label>Payout Status</label><span
-                class="badge {{ booking.payout_status|status_badge }}">{{ booking.payout_status }}</span></div>
-    </div>
-</div>
-
-{% if payment %}
-<div class="panel">
-    <div class="panel-title">Payment</div>
-    <div class="detail-grid">
-        <div class="detail-item"><label>Payment ID</label><span>{{ payment.razorpay_payment_id|default:"-" }}</span>
-        </div>
-        <div class="detail-item"><label>Order ID</label><span>{{ payment.razorpay_order_id|default:"-" }}</span></div>
-        <div class="detail-item"><label>Amount</label><span>₹{{ payment.amount_paid }}</span></div>
-        <div class="detail-item"><label>Method</label><span>{{ payment.payment_method|default:"-" }}</span></div>
-        <div class="detail-item"><label>Status</label><span class="badge {{ payment.status|status_badge }}">{{ payment.status }}</span></div>
-        <div class="detail-item"><label>Paid At</label><span>{{ payment.created_at|date:"d M Y H:i" }}</span></div>
-    </div>
+{% if msg %}
+<div class="panel" style="background:#1a2e1a;border-left:4px solid #22c55e;padding:12px 20px;margin-bottom:16px;">
+    <span style="color:#22c55e;">&#10003; {{ msg }}</span>
 </div>
 {% endif %}
 
-<!-- Ledger Entries -->
+<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;">
+<div>
+    <div class="panel">
+        <div class="panel-title">Booking Details</div>
+        <div class="detail-grid">
+            <div class="detail-item"><label>User</label><span><a href="/truff-admin/users/{{ booking.user.id }}/">{{ booking.user.username }}</a></span></div>
+            <div class="detail-item"><label>Turf</label><span><a href="/truff-admin/turfs/{{ booking.turf.id }}/">{{ booking.turf.name }}</a></span></div>
+            <div class="detail-item"><label>Owner</label><span><a href="/truff-admin/owners/{{ booking.turf.owner.id }}/">{{ booking.turf.owner.username }}</a></span></div>
+            <div class="detail-item"><label>Date</label><span>{{ booking.booking_date }}</span></div>
+            <div class="detail-item"><label>Time</label><span>{{ booking.start_time|time:"H:i" }} – {{ booking.end_time|time:"H:i" }}</span></div>
+            <div class="detail-item"><label>Booking Status</label><span class="badge {{ booking.booking_status|status_badge }}">{{ booking.booking_status }}</span></div>
+            <div class="detail-item"><label>Payment Status</label><span class="badge {{ booking.payment_status|status_badge }}">{{ booking.payment_status }}</span></div>
+            <div class="detail-item"><label>Payout Status</label><span class="badge {{ booking.payout_status|status_badge }}">{{ booking.payout_status }}</span></div>
+            <div class="detail-item"><label>Created</label><span>{{ booking.created_at|date:"d M Y H:i" }}</span></div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-title">Financial Breakdown</div>
+        <table class="data-table">
+            <tbody>
+                <tr><td>Price/Hour</td><td style="text-align:right;">&#8377;{{ booking.price_per_hour }}</td></tr>
+                <tr><td>Total Price</td><td style="text-align:right;">&#8377;{{ booking.total_price }}</td></tr>
+                {% if booking.discount %}<tr><td>Discount</td><td style="text-align:right;color:#22c55e;">-&#8377;{{ booking.discount }}</td></tr>{% endif %}
+                <tr><td>GST Amount</td><td style="text-align:right;">&#8377;{{ booking.gst_amount }}</td></tr>
+                <tr><td>Platform Fee</td><td style="text-align:right;">&#8377;{{ booking.platform_fee }}</td></tr>
+                <tr><td>GST on Platform Fee</td><td style="text-align:right;">&#8377;{{ booking.gst_on_platform_fee }}</td></tr>
+                <tr><td>Commission (5%)</td><td style="text-align:right;">&#8377;{{ booking.commission }}</td></tr>
+                <tr style="border-top:2px solid #3a3a5e;"><td><strong>Final Price (User Pays)</strong></td><td style="text-align:right;font-weight:700;color:var(--accent);">&#8377;{{ booking.final_price }}</td></tr>
+                <tr style="background:#1a2e1a;"><td><strong>Owner Payout</strong></td><td style="text-align:right;font-weight:700;color:#22c55e;">&#8377;{{ booking.owner_payout }}</td></tr>
+                <tr><td><strong>Platform Revenue</strong></td><td style="text-align:right;font-weight:700;">&#8377;{{ booking.platform_revenue }}</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    {% if payment %}
+    <div class="panel">
+        <div class="panel-title">Payment (Razorpay)</div>
+        <div class="detail-grid">
+            <div class="detail-item"><label>Order ID</label><span style="font-family:monospace;font-size:12px;">{{ payment.razorpay_order_id|default:"-" }}</span></div>
+            <div class="detail-item"><label>Payment ID</label><span style="font-family:monospace;font-size:12px;">{{ payment.razorpay_payment_id|default:"-" }}</span></div>
+            <div class="detail-item"><label>Amount Paid</label><span>&#8377;{{ payment.amount_paid }}</span></div>
+            <div class="detail-item"><label>Status</label><span class="badge {{ payment.status|status_badge }}">{{ payment.status }}</span></div>
+            <div class="detail-item"><label>Paid At</label><span>{{ payment.created_at|date:"d M Y H:i" }}</span></div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<div>
+    <div class="panel">
+        <div class="panel-title">Admin Actions</div>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+            {% if booking.booking_status != "cancelled" %}
+            <div>
+                <div style="font-size:12px;color:#8b8fa3;margin-bottom:6px;">Cancel this booking:</div>
+                <form method="post" action="/truff-admin/bookings/{{ booking.id }}/">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="cancel">
+                    <textarea name="reason" class="form-input" placeholder="Reason for cancellation" rows="2" style="width:100%;margin-bottom:6px;"></textarea>
+                    <button type="submit" class="btn btn-outline btn-sm" style="width:100%;color:#ef4444;border-color:#ef4444;" onclick="return confirm('Cancel this booking?')">&#10060; Cancel Booking</button>
+                </form>
+            </div>
+            <form method="post" action="/truff-admin/bookings/{{ booking.id }}/">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="no_show">
+                <button type="submit" class="btn btn-outline btn-sm" style="width:100%;color:#f97316;border-color:#f97316;" onclick="return confirm('Mark as No-Show?')">&#128683; Mark No-Show</button>
+            </form>
+            {% endif %}
+            {% if booking.payment_status != "refunded" %}
+            <form method="post" action="/truff-admin/bookings/{{ booking.id }}/">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="refund">
+                <button type="submit" class="btn btn-outline btn-sm" style="width:100%;color:#a78bfa;border-color:#a78bfa;" onclick="return confirm('Mark as refunded?')">&#128257; Mark as Refunded</button>
+            </form>
+            {% endif %}
+            <hr style="border-color:#2a2a3e;">
+            <a href="/truff-admin/users/{{ booking.user.id }}/" class="btn btn-outline btn-sm" style="width:100%;text-align:center;">View User</a>
+            <a href="/truff-admin/turfs/{{ booking.turf.id }}/" class="btn btn-outline btn-sm" style="width:100%;text-align:center;">View Turf</a>
+        </div>
+    </div>
+    {% if calls %}
+    <div class="panel">
+        <div class="panel-title">Calls for this Booking</div>
+        {% for c in calls %}
+        <div style="padding:8px 0;border-bottom:1px solid #2a2a3e;">
+            <a href="/truff-admin/calls/{{ c.id }}/" style="font-size:13px;">Call #{{ c.id }}</a>
+            <span class="badge {% if c.status == "completed" %}badge-success{% else %}badge-warning{% endif %}" style="margin-left:6px;">{{ c.status }}</span>
+            <div style="font-size:11px;color:#8b8fa3;">{{ c.started_at|date:"d M H:i" }} &middot; {{ c.duration_seconds }}s</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+</div>
+
 <div class="panel">
     <div class="panel-title">Ledger Entries</div>
     <table class="data-table">
         <thead>
-            <tr>
-                <th>Account</th>
-                <th>Type</th>
-                <th>Amount</th>
-                <th>Description</th>
-                <th>Time</th>
-            </tr>
+            <tr><th>Account</th><th>Type</th><th>Amount</th><th>Description</th><th>Time</th></tr>
         </thead>
         <tbody>
             {% for entry in ledger_entries %}
             <tr>
                 <td>{{ entry.account }}</td>
-                <td>
-                    {% if entry.entry_type == 'credit' %}
-                    <span class="badge badge-success">Credit</span>
-                    {% else %}
-                    <span class="badge badge-danger">Debit</span>
-                    {% endif %}
-                </td>
-                <td>₹{{ entry.amount }}</td>
+                <td>{% if entry.entry_type == "credit" %}<span class="badge badge-success">Credit</span>{% else %}<span class="badge badge-danger">Debit</span>{% endif %}</td>
+                <td>&#8377;{{ entry.amount }}</td>
                 <td>{{ entry.description }}</td>
                 <td>{{ entry.created_at|date:"d M Y H:i" }}</td>
             </tr>
             {% empty %}
-            <tr>
-                <td colspan="5" style="text-align:center;color:var(--text-muted);">No ledger entries</td>
-            </tr>
+            <tr><td colspan="5" style="text-align:center;color:var(--text-muted);">No ledger entries</td></tr>
             {% endfor %}
         </tbody>
     </table>

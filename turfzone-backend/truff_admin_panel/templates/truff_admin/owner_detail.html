@@ -5,67 +5,87 @@
 
 {% block content %}
 <div class="topbar">
-    <h1>Owner: {{ owner.get_full_name|default:owner.username }}</h1>
-    <div class="topbar-actions">
-        <a href="/truff-admin/owners/" class="btn btn-outline btn-sm">&#8592; Back</a>
-    </div>
+    <h1>Owner: {{ owner.get_full_name|default:owner.username }}{% if not owner.is_active %}<span class="badge badge-danger" style="font-size:12px;margin-left:8px;">SUSPENDED</span>{% endif %}</h1>
+    <div class="topbar-actions"><a href="/truff-admin/owners/" class="btn btn-outline btn-sm">&#8592; Back</a></div>
 </div>
 
-<!-- Stats -->
+{% if msg %}
+<div class="panel" style="background:#1a2e1a;border-left:4px solid #22c55e;padding:12px 20px;margin-bottom:16px;">
+    <span style="color:#22c55e;">&#10003; {{ msg }}</span>
+</div>
+{% endif %}
+
 <div class="kpi-grid">
-    <div class="kpi-card accent">
-        <div class="kpi-label">Total Customer Payments</div>
-        <div class="kpi-value">{{ stats.total_revenue|currency }}</div>
-    </div>
-    <div class="kpi-card">
-        <div class="kpi-label">Total Bookings</div>
-        <div class="kpi-value">{{ stats.total_bookings|default:0 }}</div>
-    </div>
-    <div class="kpi-card">
-        <div class="kpi-label">Platform Fees (incl. GST)</div>
-        <div class="kpi-value">{{ stats.platform_fees_incl_gst|currency }}</div>
-        <div class="kpi-sub" style="font-size:11px;color:#8b8fa3;margin-top:4px;">Base: {{ stats.total_platform_fee|currency }} + GST: {{ stats.total_gst_on_platform_fee|currency }}</div>
-    </div>
-    <div class="kpi-card">
-        <div class="kpi-label">Commission 5% (incl. GST)</div>
-        <div class="kpi-value">{{ stats.commission_incl_gst|currency }}</div>
-        <div class="kpi-sub" style="font-size:11px;color:#8b8fa3;margin-top:4px;">Base: {{ stats.total_commission|currency }} + GST: {{ stats.total_gst_on_commission|currency }}</div>
-    </div>
-    <div class="kpi-card accent">
-        <div class="kpi-label">Platform Revenue</div>
-        <div class="kpi-value">{{ stats.total_platform_revenue|currency }}</div>
-        <div class="kpi-sub" style="font-size:11px;color:#8b8fa3;margin-top:4px;">Fees + Commission (incl. GST)</div>
-    </div>
-    <div class="kpi-card accent">
-        <div class="kpi-label">Owner Payout</div>
-        <div class="kpi-value">{{ stats.total_owner_payout|currency }}</div>
-    </div>
+    <div class="kpi-card accent"><div class="kpi-label">Total Revenue</div><div class="kpi-value">{{ stats.total_revenue|currency }}</div></div>
+    <div class="kpi-card"><div class="kpi-label">Total Bookings</div><div class="kpi-value">{{ stats.total_bookings|default:0 }}</div></div>
+    <div class="kpi-card"><div class="kpi-label">Platform Fees (incl. GST)</div><div class="kpi-value">{{ stats.platform_fees_incl_gst|currency }}</div></div>
+    <div class="kpi-card"><div class="kpi-label">Commission (incl. GST)</div><div class="kpi-value">{{ stats.commission_incl_gst|currency }}</div></div>
+    <div class="kpi-card accent"><div class="kpi-label">Platform Revenue</div><div class="kpi-value">{{ stats.total_platform_revenue|currency }}</div></div>
+    <div class="kpi-card accent"><div class="kpi-label">Owner Payout</div><div class="kpi-value">{{ stats.total_owner_payout|currency }}</div></div>
 </div>
 
-<!-- Owner Info -->
+<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;">
 <div class="panel">
     <div class="panel-title">Owner Details</div>
     <div class="detail-grid">
         <div class="detail-item"><label>Username</label><span>{{ owner.username }}</span></div>
+        <div class="detail-item"><label>Full Name</label><span>{{ owner.get_full_name|default:"--" }}</span></div>
         <div class="detail-item"><label>Phone</label><span>{{ owner.phone_number|default:"-" }}</span></div>
         <div class="detail-item"><label>Email</label><span>{{ owner.email|default:"-" }}</span></div>
         <div class="detail-item"><label>Verified</label><span>{{ owner.is_verified|yesno:"Yes,No" }}</span></div>
+        <div class="detail-item"><label>Active</label><span>{{ owner.is_active|yesno:"Yes,No" }}</span></div>
         <div class="detail-item"><label>Joined</label><span>{{ owner.created_at|date:"d M Y" }}</span></div>
+        <div class="detail-item"><label>Last Login</label><span>{{ owner.last_login|date:"d M Y H:i"|default:"Never" }}</span></div>
     </div>
+    {% if owner.turf_owner_profile %}
+    <div class="panel-title" style="margin-top:16px;">Bank Details</div>
+    <div class="detail-grid">
+        <div class="detail-item"><label>Account No.</label><span>{{ owner.turf_owner_profile.bank_account|default:"--" }}</span></div>
+        <div class="detail-item"><label>IFSC</label><span>{{ owner.turf_owner_profile.ifsc_code|default:"--" }}</span></div>
+        <div class="detail-item"><label>Account Holder</label><span>{{ owner.turf_owner_profile.account_holder_name|default:"--" }}</span></div>
+        <div class="detail-item"><label>Bank Verified</label><span>{% if owner.turf_owner_profile.bank_verified %}<span class="badge badge-success">&#10003; Verified</span>{% else %}<span class="badge badge-warning">&#10060; Not Verified</span>{% endif %}</span></div>
+    </div>
+    {% endif %}
 </div>
 
-<!-- Turfs -->
+<div class="panel">
+    <div class="panel-title">Admin Actions</div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+        {% if owner.turf_owner_profile %}
+        <form method="post" action="/truff-admin/owners/{{ owner.id }}/">
+            {% csrf_token %}
+            {% if owner.turf_owner_profile.bank_verified %}
+            <input type="hidden" name="action" value="unverify_bank">
+            <button type="submit" class="btn btn-outline btn-sm" style="width:100%;">&#10060; Unverify Bank</button>
+            {% else %}
+            <input type="hidden" name="action" value="verify_bank">
+            <button type="submit" class="btn btn-primary btn-sm" style="width:100%;background:#22c55e;">&#9989; Verify Bank Account</button>
+            {% endif %}
+        </form>
+        {% endif %}
+        <form method="post" action="/truff-admin/owners/{{ owner.id }}/">
+            {% csrf_token %}
+            {% if owner.is_active %}
+            <input type="hidden" name="action" value="suspend">
+            <div style="display:flex;gap:6px;">
+                <input type="text" name="reason" class="form-input" placeholder="Reason for suspension" style="flex:1;font-size:12px;">
+                <button type="submit" class="btn btn-outline btn-sm" style="color:#f97316;border-color:#f97316;white-space:nowrap;" onclick="return confirm('Suspend this owner?')">&#9940; Suspend</button>
+            </div>
+            {% else %}
+            <input type="hidden" name="action" value="reactivate">
+            <button type="submit" class="btn btn-primary btn-sm" style="width:100%;">&#9989; Reactivate Owner</button>
+            {% endif %}
+        </form>
+        <hr style="border-color:#2a2a3e;margin:4px 0;">
+        <a href="/truff-admin/export/owners/" class="btn btn-outline btn-sm" style="width:100%;text-align:center;">&#128229; Export Owner Data</a>
+    </div>
+</div>
+</div>
+
 <div class="panel">
     <div class="panel-title">Turfs ({{ turfs.count }})</div>
     <table class="data-table">
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Name</th>
-                <th>City</th>
-                <th>Status</th>
-            </tr>
-        </thead>
+        <thead><tr><th>ID</th><th>Name</th><th>City</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
             {% for t in turfs %}
             <tr>
@@ -73,30 +93,56 @@
                 <td><a href="/truff-admin/turfs/{{ t.id }}/">{{ t.name }}</a></td>
                 <td>{{ t.city|default:"-" }}</td>
                 <td><span class="badge {{ t.status|status_badge }}">{{ t.status }}</span></td>
+                <td><a href="/truff-admin/turfs/{{ t.id }}/edit/" class="btn btn-outline btn-sm">Edit</a></td>
             </tr>
             {% empty %}
-            <tr>
-                <td colspan="4" style="text-align:center;color:#8b8fa3;">No turfs</td>
-            </tr>
+            <tr><td colspan="5" style="text-align:center;color:#8b8fa3;">No turfs</td></tr>
             {% endfor %}
         </tbody>
     </table>
 </div>
 
-<!-- Recent Bookings -->
+<div class="panel">
+    <div class="panel-title">Payout Settlements</div>
+    <div style="overflow-x:auto;">
+        <table class="data-table" style="min-width:900px;">
+            <thead><tr><th>ID</th><th>Period</th><th>Gross</th><th>Commission</th><th>Net Payout</th><th>Status</th><th>UTR</th><th>Action</th></tr></thead>
+            <tbody>
+                {% for s in settlements %}
+                <tr>
+                    <td>{{ s.id }}</td>
+                    <td style="white-space:nowrap;font-size:12px;">{{ s.period_start }} &#8594; {{ s.period_end }}</td>
+                    <td>{{ s.total_gross|currency }}</td>
+                    <td>{{ s.total_commission|currency }}</td>
+                    <td style="font-weight:700;">{{ s.net_payout|currency }}</td>
+                    <td><span class="badge {{ s.status|status_badge }}">{{ s.status }}</span></td>
+                    <td style="font-size:12px;">{{ s.razorpay_transfer_id|default:"-" }}</td>
+                    <td>
+                        {% if s.status != "completed" %}
+                        <form method="post" action="/truff-admin/owners/{{ owner.id }}/" style="display:inline;">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="mark_settlement_paid">
+                            <input type="hidden" name="settlement_id" value="{{ s.id }}">
+                            <input type="text" name="utr" class="form-input" placeholder="UTR #" style="width:90px;font-size:11px;display:inline;">
+                            <button type="submit" class="btn btn-primary btn-sm">Mark Paid</button>
+                        </form>
+                        {% else %}
+                        <span style="color:#22c55e;font-size:12px;">&#10003; Paid {{ s.settled_at|date:"d M" }}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="8" style="text-align:center;color:#8b8fa3;">No settlements</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
 <div class="panel">
     <div class="panel-title">Recent Bookings</div>
     <table class="data-table">
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Turf</th>
-                <th>User</th>
-                <th>Date</th>
-                <th>Status</th>
-                <th>Amount</th>
-            </tr>
-        </thead>
+        <thead><tr><th>ID</th><th>Turf</th><th>User</th><th>Date</th><th>Status</th><th>Amount</th></tr></thead>
         <tbody>
             {% for b in bookings %}
             <tr>
@@ -108,28 +154,17 @@
                 <td>&#8377;{{ b.final_price }}</td>
             </tr>
             {% empty %}
-            <tr>
-                <td colspan="6" style="text-align:center;color:#8b8fa3;">No bookings</td>
-            </tr>
+            <tr><td colspan="6" style="text-align:center;color:#8b8fa3;">No bookings</td></tr>
             {% endfor %}
         </tbody>
     </table>
 </div>
 
-<!-- PIN Requests -->
 {% if pin_requests %}
 <div class="panel">
     <div class="panel-title">PIN Change Requests</div>
     <table class="data-table">
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Status</th>
-                <th>Created</th>
-                <th>Resolved</th>
-                <th>Admin</th>
-            </tr>
-        </thead>
+        <thead><tr><th>ID</th><th>Status</th><th>Created</th><th>Resolved</th><th>Admin</th></tr></thead>
         <tbody>
             {% for p in pin_requests %}
             <tr>

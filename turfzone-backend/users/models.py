@@ -21,7 +21,7 @@ class CustomUser(AbstractUser):
     role = models.CharField(max_length=20, choices=UserRole.choices, default=UserRole.USER)
     profile_picture = models.ImageField(upload_to='profile_pictures/', blank=True, null=True)
     bio = models.TextField(blank=True, null=True)
-    is_verified = models.BooleanField(default=False)
+    is_verified = models.BooleanField(default=True)  # Auto-verified: booking app
     is_phone_verified = models.BooleanField(default=False)
 
     # Referral system

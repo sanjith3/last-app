@@ -49,6 +49,10 @@ class UserRegistrationViewSet(viewsets.ViewSet):
         serializer = CustomUserRegistrationSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
+            # Auto-verify: booking apps don't require manual admin approval
+            if not user.is_verified:
+                user.is_verified = True
+                user.save(update_fields=['is_verified'])
             refresh = RefreshToken.for_user(user)
             return Response({
                 'success': True,
@@ -117,6 +121,10 @@ class UserRegistrationViewSet(viewsets.ViewSet):
                         google_maps_share_link=google_maps_link,
                     )
                     
+                    # Auto-verify account (turf still needs separate approval)
+                    if not user.is_verified:
+                        user.is_verified = True
+                        user.save(update_fields=['is_verified'])
                     refresh = RefreshToken.for_user(user)
                     message = (
                         'New turf added successfully. Your turf is pending approval.'
