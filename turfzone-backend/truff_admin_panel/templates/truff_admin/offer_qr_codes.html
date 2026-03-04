@@ -1,0 +1,103 @@
+{% extends "truff_admin/base.html" %}
+{% block title %}Owner QR Codes — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:center;">
+    <div>
+        <h1>📷 Owner QR Codes</h1>
+        <p class="subtitle">Offline growth via turf QR codes — track scans, installs, and bookings.</p>
+    </div>
+    <a href="/truff-admin/offers/" class="btn btn-outline">← All Offers</a>
+</div>
+
+<!-- Summary -->
+<div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px;">
+    <div class="stat-card">
+        <div class="stat-label">Total Owners</div>
+        <div class="stat-value">{{ owners|length }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Total QR Scans</div>
+        <div class="stat-value">{{ total_qr_scans|default:0 }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Total Installs</div>
+        <div class="stat-value">{{ total_qr_installs|default:0 }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Total QR Revenue</div>
+        <div class="stat-value" style="color:#1DB954;">₹{{ total_qr_revenue|floatformat:0 }}</div>
+    </div>
+</div>
+
+<!-- QR Table -->
+<div class="card">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <h2 style="margin:0;">Owner QR Codes</h2>
+        <a href="/truff-admin/offers/export/" class="btn btn-outline" style="font-size:12px;">⬇ Export Report</a>
+    </div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Owner</th>
+                <th>QR Link</th>
+                <th>Scans</th>
+                <th>Installs</th>
+                <th>Bookings</th>
+                <th>Earnings</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for owner in owners %}
+            <tr>
+                <td>
+                    <strong>{{ owner.user.get_full_name|default:owner.user.username }}</strong><br>
+                    <span style="font-size:11px;color:#888;">{{ owner.user.phone_number }}</span>
+                </td>
+                <td>
+                    <code style="font-size:11px;background:#f5f5f5;padding:2px 6px;border-radius:4px;">
+                    https://turfzone.app/join?owner={{ owner.id }}&code={{ owner.user.referral_code }}
+                </code>
+                </td>
+                <td>{{ owner.qr_scans }}</td>
+                <td>{{ owner.qr_installs }}</td>
+                <td>{{ owner.qr_bookings }}</td>
+                <td><strong style="color:#1DB954;">₹{{ owner.qr_earnings|floatformat:0 }}</strong></td>
+                <td>
+                    <a href="/truff-admin/owners/{{ owner.user.pk }}/" class="btn btn-sm btn-outline">View</a>
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="7" style="text-align:center;color:#888;padding:30px;">
+                    No turf owners found.
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- QR Generator Info Box -->
+<div class="card" style="margin-top:24px;padding:20px;">
+    <h3 style="margin:0 0 12px;">📱 How Owner QR Codes Work</h3>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;font-size:13px;">
+        <div style="background:#f0fdf4;border-radius:8px;padding:12px;text-align:center;">
+            <div style="font-size:24px;margin-bottom:8px;">📷</div>
+            <strong>1. Customer scans QR</strong><br>
+            <span style="color:#666;">At the turf ground</span>
+        </div>
+        <div style="background:#eff6ff;border-radius:8px;padding:12px;text-align:center;">
+            <div style="font-size:24px;margin-bottom:8px;">📲</div>
+            <strong>2. App installs / opens</strong><br>
+            <span style="color:#666;">Owner gets credited</span>
+        </div>
+        <div style="background:#fef3c7;border-radius:8px;padding:12px;text-align:center;">
+            <div style="font-size:24px;margin-bottom:8px;">💰</div>
+            <strong>3. First booking done</strong><br>
+            <span style="color:#666;">Owner earns reward</span>
+        </div>
+    </div>
+</div>
+{% endblock %}

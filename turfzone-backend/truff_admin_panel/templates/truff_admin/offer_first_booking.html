@@ -1,0 +1,80 @@
+﻿{% extends "truff_admin/base.html" %}
+{% block title %}First Booking Offer - Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:center;">
+    <div>
+        <h1>First Booking Discount</h1>
+        <p class="subtitle">Convert new users with a welcome offer.</p>
+    </div>
+    <a href="/truff-admin/offers/" class="btn btn-outline">Back to All Offers</a>
+</div>
+
+{% if request.GET.saved %}
+<div class="alert alert-success" style="margin-bottom:16px;">Changes saved successfully.</div>
+{% endif %}
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+    <div class="card">
+        <div class="card-header"><h2 style="margin:0;">Configuration</h2></div>
+        <form method="post" style="padding:20px;">
+            {% csrf_token %}
+            <label style="display:flex;align-items:center;gap:10px;margin-bottom:20px;cursor:pointer;">
+                <input type="checkbox" name="is_active" {% if cfg.is_active %}checked{% endif %} style="width:20px;height:20px;accent-color:#1DB954;">
+                <span style="font-weight:600;font-size:15px;">Enable First Booking Offer</span>
+            </label>
+            <div class="form-group" style="margin-bottom:16px;">
+                <label style="font-weight:600;margin-bottom:4px;display:block;">Discount Type</label>
+                <div style="display:flex;gap:20px;">
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                        <input type="radio" name="discount_type" value="fixed" {% if not cfg.discount_percent %}checked{% endif %}> Fixed Amount
+                    </label>
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                        <input type="radio" name="discount_type" value="percent" {% if cfg.discount_percent %}checked{% endif %}> Percentage
+                    </label>
+                </div>
+            </div>
+            <div class="form-group" style="margin-bottom:16px;" id="fixed-group">
+                <label style="font-weight:600;margin-bottom:4px;display:block;">Discount Amount (Rs)</label>
+                <input type="number" name="discount_amount" value="{{ cfg.discount_amount|default:'100' }}" min="0" class="form-control">
+            </div>
+            <div class="form-group" style="margin-bottom:16px;" id="percent-group">
+                <label style="font-weight:600;margin-bottom:4px;display:block;">Discount Percentage (%)</label>
+                <input type="number" name="discount_percent" value="{{ cfg.discount_percent|default:'' }}" min="0" max="100" class="form-control">
+            </div>
+            <div class="form-group" style="margin-bottom:16px;">
+                <label style="font-weight:600;margin-bottom:4px;display:block;">Minimum Order Value (Rs)</label>
+                <input type="number" name="min_order_value" value="{{ cfg.min_order_value|default:'0' }}" min="0" class="form-control">
+            </div>
+            <div class="form-group" style="margin-bottom:24px;">
+                <label style="font-weight:600;margin-bottom:4px;display:block;">Valid for (days after registration)</label>
+                <input type="number" name="expiry_days" value="{{ cfg.expiry_days|default:'7' }}" min="1" max="90" class="form-control">
+            </div>
+            <button type="submit" class="btn btn-primary" style="width:100%;">Save Changes</button>
+        </form>
+    </div>
+    <div>
+        <div class="card" style="margin-bottom:16px;">
+            <div class="card-header"><h2 style="margin:0;">Usage Stats</h2></div>
+            <div style="padding:20px;">
+                <div class="stats-grid" style="grid-template-columns:1fr 1fr;gap:12px;">
+                    <div class="stat-card"><div class="stat-label">Used Today</div><div class="stat-value">{{ uses_today }}</div></div>
+                    <div class="stat-card"><div class="stat-label">Total Used</div><div class="stat-value">{{ uses_total }}</div></div>
+                    <div class="stat-card"><div class="stat-label">Total Cost</div><div class="stat-value">Rs{{ total_cost|floatformat:0 }}</div></div>
+                    <div class="stat-card"><div class="stat-label">Est. Revenue</div><div class="stat-value" style="color:#1DB954;">Rs{{ total_revenue|floatformat:0 }}</div></div>
+                </div>
+                <div style="margin-top:12px;text-align:center;font-size:14px;color:#666;">ROI: <strong style="color:#1DB954;font-size:18px;">{{ roi }}x</strong></div>
+            </div>
+        </div>
+        {% if cfg.updated_by %}
+        <div class="card" style="padding:16px;">
+            <p style="margin:0;color:#666;font-size:13px;">Last updated by <strong>{{ cfg.updated_by.username }}</strong> on {{ cfg.updated_at|date:"M d, Y H:i" }}</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+<script>
+document.querySelectorAll('input[name="discount_type"]').forEach(r=>{r.addEventListener('change',function(){document.getElementById('fixed-group').style.display=this.value==='fixed'?'':'none';document.getElementById('percent-group').style.display=this.value==='percent'?'':'none';});});
+var ch=document.querySelector('input[name="discount_type"]:checked');if(ch){document.getElementById('fixed-group').style.display=ch.value==='fixed'?'':'none';document.getElementById('percent-group').style.display=ch.value==='percent'?'':'none';}
+</script>
+{% endblock %}

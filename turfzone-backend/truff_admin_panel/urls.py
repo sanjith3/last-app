@@ -3,7 +3,9 @@ Truff-Admin URL routes — all under /truff-admin/
 """
 
 from django.urls import path
+from django.views.generic import RedirectView
 from . import views
+from . import push_views
 
 app_name = 'truff_admin'
 
@@ -74,4 +76,23 @@ urlpatterns = [
     path('support/', views.SupportDashboardView.as_view(), name='support'),
     path('support/unread-count/', views.SupportUnreadCountView.as_view(), name='support_unread'),
     path('support/<str:ticket_id>/', views.SupportTicketDetailView.as_view(), name='support_ticket'),
+
+    # ─── Offer Management ────────────────────────────────────────────────────
+    path('offers/', views.OffersOverviewView.as_view(), name='offers'),
+    path('offers/first-booking/', views.FirstBookingOfferView.as_view(), name='offer_first_booking'),
+    path('offers/referral/', views.ReferralProgramView.as_view(), name='offer_referral'),
+    path('offers/last-minute/', views.LastMinuteDealsView.as_view(), name='offer_last_minute'),
+    path('offers/streaks/', views.StreakRewardsView.as_view(), name='offer_streaks'),
+    path('offers/streak/', RedirectView.as_view(url='/truff-admin/offers/streaks/', permanent=True)),
+    path('offers/loyalty/', views.LoyaltyTiersView.as_view(), name='offer_loyalty'),
+    path('offers/captain/', views.CaptainRewardsView.as_view(), name='offer_captain'),
+    path('offers/wallet/', views.WalletCashbackView.as_view(), name='offer_wallet'),
+    path('offers/qr-codes/', views.OwnerQRCodesView.as_view(), name='offer_qr_codes'),
+    path('offers/export/', views.ExportOfferReportView.as_view(), name='offer_export'),
+
+    # ─── Push Notifications ───────────────────────────────────────────────────
+    path('push/', push_views.PushNotificationCenterView.as_view(), name='push_center'),
+    path('push/history/', push_views.PushNotificationListView.as_view(), name='push_list'),
+    path('push/send/', push_views.PushNotificationSendView.as_view(), name='push_send'),
+    path('push/test/', push_views.PushNotificationTestView.as_view(), name='push_test'),
 ]

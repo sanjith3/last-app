@@ -45,7 +45,9 @@ class UserRegistrationViewSet(viewsets.ViewSet):
     
     @action(detail=False, methods=['post'])
     def normal_user_register(self, request):
-        """Register a normal user."""
+        """Register a normal user.
+        Idempotent: if user already exists and password matches, return tokens (login).
+        """
         serializer = CustomUserRegistrationSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
@@ -63,10 +65,47 @@ class UserRegistrationViewSet(viewsets.ViewSet):
                     'access': str(refresh.access_token),
                 }
             }, status=status.HTTP_201_CREATED)
+
+        # ── Handle duplicate username / phone gracefully ──
+        errors = serializer.errors
+        username_errors = errors.get('username', [])
+        is_duplicate = any('already exists' in str(e) for e in username_errors)
+
+        if is_duplicate:
+            username = request.data.get('username', '').strip()
+            password = request.data.get('password', '')
+
+            # Try to find existing user by username or phone_number
+            existing = (
+                User.objects.filter(username=username).first()
+                or User.objects.filter(phone_number=username).first()
+            )
+
+            if existing and existing.check_password(password):
+                # Correct password → silent auto-login (idempotent registration)
+                refresh = RefreshToken.for_user(existing)
+                return Response({
+                    'success': True,
+                    'message': 'Welcome back! Logged in successfully.',
+                    'user': CustomUserDetailSerializer(existing).data,
+                    'tokens': {
+                        'refresh': str(refresh),
+                        'access': str(refresh.access_token),
+                    }
+                }, status=status.HTTP_200_OK)
+            else:
+                # Wrong password — tell user they're already registered
+                return Response({
+                    'success': False,
+                    'error': 'This phone number is already registered. Please log in instead.',
+                    'error_code': 'already_registered',
+                }, status=status.HTTP_400_BAD_REQUEST)
+
         return Response({
             'success': False,
-            'errors': serializer.errors
+            'errors': errors
         }, status=status.HTTP_400_BAD_REQUEST)
+
     
     @action(detail=False, methods=['post'])
     def turf_owner_register(self, request):
@@ -113,14 +152,45 @@ class UserRegistrationViewSet(viewsets.ViewSet):
                         address=request.data.get('address', ''),
                         city=request.data.get('city', ''),
                         state=request.data.get('state', ''),
+                        postal_code=request.data.get('postal_code', ''),
                         latitude=coords['latitude'],
                         longitude=coords['longitude'],
                         price_per_hour=request.data.get('price_per_hour', 500),
+                        max_players=request.data.get('max_players', 22),
                         status=TurfStatus.PENDING,
                         is_active=False,
                         google_maps_share_link=google_maps_link,
                     )
-                    
+
+                    # Add Sports by name (get_or_create so custom sports work too)
+                    for sport_name in request.data.get('sports', []):
+                        if sport_name and str(sport_name).strip():
+                            sport_obj, _ = Sport.objects.get_or_create(
+                                name=str(sport_name).strip()
+                            )
+                            turf.sports.add(sport_obj)
+
+                    # Add Amenities by name
+                    for amenity_name in request.data.get('amenities', []):
+                        if amenity_name and str(amenity_name).strip():
+                            amenity_obj, _ = Amenity.objects.get_or_create(
+                                name=str(amenity_name).strip()
+                            )
+                            turf.amenities.add(amenity_obj)
+
+                    # Save bank details to TurfOwner profile
+                    turf_owner, _ = TurfOwner.objects.get_or_create(user=user)
+                    bank_fields = {
+                        'account_holder_name': request.data.get('account_holder_name', ''),
+                        'bank_account': request.data.get('bank_account', ''),
+                        'bank_name': request.data.get('bank_name', ''),
+                        'ifsc_code': request.data.get('ifsc_code', ''),
+                    }
+                    for field, value in bank_fields.items():
+                        if value:
+                            setattr(turf_owner, field, value)
+                    turf_owner.save()
+
                     # Auto-verify account (turf still needs separate approval)
                     if not user.is_verified:
                         user.is_verified = True

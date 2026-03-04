@@ -50,6 +50,9 @@ class CustomUser(AbstractUser):
     # First booking flag — one-way, never resets (for welcome banner)
     first_booking_completed = models.BooleanField(default=False)
 
+    # FCM push notification token — updated each app launch
+    fcm_token = models.TextField(blank=True, null=True, help_text='Firebase Cloud Messaging device token')
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -199,6 +202,29 @@ class PromoCode(models.Model):
 
     def __str__(self):
         return f"{self.code} ({self.discount_type}: {self.discount_value})"
+
+
+class CouponUsage(models.Model):
+    """Tracks which users have used which promo codes — enforces one-time use per user."""
+    user = models.ForeignKey(
+        'CustomUser',
+        on_delete=models.CASCADE,
+        related_name='coupon_usages',
+    )
+    coupon = models.ForeignKey(
+        PromoCode,
+        on_delete=models.CASCADE,
+        related_name='usages',
+    )
+    booking_id = models.IntegerField(null=True, blank=True)  # Avoids circular import with bookings app
+    used_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'coupon')  # One use per coupon per user
+        ordering = ['-used_at']
+
+    def __str__(self):
+        return f"{self.user} used {self.coupon.code} on {self.used_at:%Y-%m-%d}"
 
 
 # ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@ from . import views
 from .views_extended import (
     OTPViewSet, ChatViewSet, PromoCodeViewSet,
     DeviceTokenViewSet, DisputeViewSet, ReferralViewSet,
-    OwnerBankDetailsViewSet,
+    OwnerBankDetailsViewSet, register_fcm_token as register_fcm_token_view,
 )
 
 router = DefaultRouter()
@@ -28,4 +28,5 @@ router.register(r'owner-bank', OwnerBankDetailsViewSet, basename='owner-bank')
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('fcm-token/', register_fcm_token_view, name='register-fcm-token'),
 ]

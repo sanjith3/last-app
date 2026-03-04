@@ -33,7 +33,8 @@ class TurfImageSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TurfImage
-        fields = ['id', 'image', 'caption', 'is_cover', 'uploaded_at']
+        fields = ['id', 'image', 'caption', 'is_cover', 'uploaded_at',
+                  'crop_x', 'crop_y', 'crop_width', 'crop_height']
         read_only_fields = ['id', 'uploaded_at']
 
     def get_image(self, obj):
@@ -42,7 +43,13 @@ class TurfImageSerializer(serializers.ModelSerializer):
             url = obj.image.url
             if request:
                 return request.build_absolute_uri(url)
-            return url
+            # Fallback: build absolute URL using settings when ctx has no request
+            from django.conf import settings
+            host = settings.ALLOWED_HOSTS[0] if settings.ALLOWED_HOSTS and settings.ALLOWED_HOSTS[0] != '*' else '127.0.0.1'
+            scheme = 'https' if not settings.DEBUG else 'http'
+            port = getattr(settings, 'HTTP_PORT', 8000)
+            base = f'{scheme}://{host}:{port}'
+            return f'{base}{url}'
         return None
 
 
@@ -62,10 +69,10 @@ class TurfListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Turf
         fields = [
-            'id', 'name', 'city', 'price_per_hour', 'rating', 'review_count',
-            'address', 'latitude', 'longitude', 'sports', 'amenities',
-            'images', 'cover_image', 'distance', 'status', 'rejection_reason',
-            'suspend_reason', 'google_maps_share_link',
+            'id', 'name', 'description', 'city', 'price_per_hour', 'max_players',
+            'rating', 'review_count', 'address', 'latitude', 'longitude',
+            'sports', 'amenities', 'images', 'cover_image', 'distance',
+            'status', 'rejection_reason', 'suspend_reason', 'google_maps_share_link',
             'has_active_offer', 'max_offer_type', 'max_offer_value',
             'stats', 'is_favorite',
         ]

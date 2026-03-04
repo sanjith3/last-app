@@ -1,0 +1,88 @@
+﻿{% extends "truff_admin/base.html" %}
+{% block title %}Streak Rewards - Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:center;">
+    <div>
+        <h1>Streak Rewards</h1>
+        <p class="subtitle">Reward users who keep booking week after week.</p>
+    </div>
+    <a href="/truff-admin/offers/" class="btn btn-outline">Back to All Offers</a>
+</div>
+
+{% if request.GET.saved %}
+<div class="alert alert-success" style="margin-bottom:16px;">Changes saved.</div>
+{% endif %}
+
+<div style="display:grid;grid-template-columns:1.5fr 1fr;gap:24px;">
+    <div class="card">
+        <div class="card-header"><h2 style="margin:0;">Streak Levels</h2></div>
+        <form method="post" style="padding:20px;" id="streak-form">
+            {% csrf_token %}
+            <input type="hidden" name="thresholds_json" id="thresholds-json">
+            <input type="hidden" name="rewards_json" id="rewards-json">
+            <label style="display:flex;align-items:center;gap:10px;margin-bottom:20px;cursor:pointer;">
+                <input type="checkbox" name="is_active" {% if cfg.is_active %}checked{% endif %} style="width:20px;height:20px;accent-color:#1DB954;">
+                <span style="font-weight:600;font-size:15px;">Enable Streak Rewards</span>
+            </label>
+            <table class="data-table" id="streak-table">
+                <thead>
+                    <tr>
+                        <th>Consecutive Weeks</th>
+                        <th>Reward (Rs, 0 = Free Booking)</th>
+                        <th>Active Users</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="streak-body">
+                    {% for lvl in levels %}
+                    <tr>
+                        <td><input type="number" class="form-control s-weeks" value="{{ lvl.weeks }}" min="1" style="width:90px;"></td>
+                        <td>
+                            <input type="number" class="form-control s-reward" value="{{ lvl.reward }}" min="0" style="width:90px;">
+                            {% if lvl.reward == 0 %}<span style="color:#1DB954;font-size:12px;">Free Booking</span>{% endif %}
+                        </td>
+                        <td><span class="badge badge-info">{{ lvl.count }}</span></td>
+                        <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">Remove</button></td>
+                    </tr>
+                    {% empty %}
+                    <tr id="empty-row"><td colspan="4" style="text-align:center;color:#888;">No streak levels configured.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <div style="margin-top:12px;display:flex;gap:8px;">
+                <button type="button" class="btn btn-outline" onclick="addRow()">Add Level</button>
+                <button type="submit" class="btn btn-primary" onclick="collect()">Save Changes</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="card">
+        <div class="card-header"><h2 style="margin:0;">Active Streaks</h2></div>
+        <div style="padding:20px;">
+            {% for lvl in levels %}
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f0f0f0;">
+                <div>
+                    <span style="font-weight:600;">{{ lvl.weeks }}-week streak</span><br>
+                    <span style="font-size:12px;color:#666;">Rs{{ lvl.reward }} reward</span>
+                </div>
+                <span class="badge badge-success">{{ lvl.count }} users</span>
+            </div>
+            {% empty %}
+            <p style="color:#888;">No streak data yet.</p>
+            {% endfor %}
+            <div style="margin-top:16px;padding-top:16px;border-top:1px solid #f0f0f0;">
+                <div class="stat-card">
+                    <div class="stat-label">Total Rewards Paid</div>
+                    <div class="stat-value">Rs{{ total_cost|floatformat:0 }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function addRow(){var e=document.getElementById('empty-row');if(e)e.remove();var tr=document.createElement('tr');tr.innerHTML='<td><input type="number" class="form-control s-weeks" value="6" min="1" style="width:90px;"></td><td><input type="number" class="form-control s-reward" value="100" min="0" style="width:90px;"></td><td>-</td><td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest(\'tr\').remove()">Remove</button></td>';document.getElementById('streak-body').appendChild(tr);}
+function collect(){var t=[],r=[];document.querySelectorAll('#streak-body tr').forEach(function(tr){var w=tr.querySelector('.s-weeks'),rw=tr.querySelector('.s-reward');if(w&&rw){t.push(parseInt(w.value));r.push(parseInt(rw.value));}});document.getElementById('thresholds-json').value=JSON.stringify(t);document.getElementById('rewards-json').value=JSON.stringify(r);}
+</script>
+{% endblock %}

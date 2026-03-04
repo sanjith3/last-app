@@ -520,3 +520,58 @@ class OwnerQRViewSet(viewsets.ViewSet):
             'qr_bookings': owner.qr_bookings,
             'qr_earnings': str(owner.qr_earnings),
         })
+
+
+# ---------------------------------------------------------------------------
+# Offer Config API — public endpoint for Flutter app
+# ---------------------------------------------------------------------------
+
+from rest_framework.views import APIView
+from .models import OfferConfig
+
+
+class OfferConfigAPIView(APIView):
+    """
+    GET /api/growth/config/
+    Returns all active offer configurations as structured JSON for Flutter.
+    Auto-initialises defaults on first call.
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        OFFER_TYPES = [
+            'first_booking', 'referral', 'last_minute',
+            'streak', 'loyalty', 'captain', 'wallet',
+        ]
+        OFFER_NAMES = {
+            'first_booking': 'First Booking Discount',
+            'referral': 'Referral Program',
+            'last_minute': 'Last Minute Deals',
+            'streak': 'Streak Rewards',
+            'loyalty': 'Loyalty Tiers',
+            'captain': 'Captain Rewards',
+            'wallet': 'Wallet Cashback',
+        }
+
+        # Ensure default configs exist
+        for ot in OFFER_TYPES:
+            OfferConfig.get_or_create_default(ot, OFFER_NAMES[ot])
+
+        configs = OfferConfig.objects.all()
+        result = {}
+        for cfg in configs:
+            result[cfg.offer_type] = {
+                'is_active': cfg.is_active,
+                'discount_amount': str(cfg.discount_amount) if cfg.discount_amount else None,
+                'discount_percent': cfg.discount_percent,
+                'min_order_value': str(cfg.min_order_value) if cfg.min_order_value else None,
+                'expiry_days': cfg.expiry_days,
+                'streak_thresholds': cfg.streak_thresholds,
+                'streak_rewards': cfg.streak_rewards,
+                'loyalty_tiers': cfg.loyalty_tiers,
+                'loyalty_perks': cfg.loyalty_perks,
+                'referral_rewards': cfg.referral_rewards,
+                'last_minute_windows': cfg.last_minute_windows,
+            }
+
+        return Response({'success': True, 'config': result})

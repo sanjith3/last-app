@@ -16,4 +16,6 @@ router.register(r'owner-qr', views.OwnerQRViewSet, basename='owner-qr')
 
 urlpatterns = [
     path('', include(router.urls)),
+    # Flutter offer config endpoint
+    path('config/', views.OfferConfigAPIView.as_view(), name='offer-config'),
 ]

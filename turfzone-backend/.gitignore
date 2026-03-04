@@ -1,0 +1,17 @@
+# Secrets
+firebase-service-account.json
+*.json.key
+
+# Test scripts
+test_*.py
+
+# Media uploads
+turfzone-backend/media/
+
+# Python
+__pycache__/
+*.pyc
+.env
+.venv/
+venv/
+

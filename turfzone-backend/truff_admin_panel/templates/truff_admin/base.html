@@ -125,9 +125,17 @@
                     class="{% if 'promo' in request.resolver_match.url_name %}active{% endif %}">
                     <span class="icon">🏷️</span> Promo Codes
                 </a></li>
+            <li><a href="/truff-admin/offers/"
+                    class="{% if 'offer' in request.resolver_match.url_name %}active{% endif %}">
+                    <span class="icon">🎁</span> Offers
+                </a></li>
             <li><a href="/truff-admin/pin-requests/"
                     class="{% if 'pin' in request.resolver_match.url_name %}active{% endif %}">
                     <span class="icon">🔑</span> PIN Requests
+                </a></li>
+            <li><a href="/truff-admin/push/"
+                    class="{% if 'push' in request.resolver_match.url_name %}active{% endif %}">
+                    <span class="icon">🔔</span> Notifications
                 </a></li>
             <div class="sidebar-divider"></div>
             <li><a href="/truff-admin/audit-log/"

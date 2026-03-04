@@ -31,6 +31,7 @@ urlpatterns = [
     path('api/payments/', include('payments.urls')),
     path('api/growth/', include('growth.urls')),
     path('api/support/', include('support.urls')),
+    path('api/coupons/', include('users.coupon_urls')),
     path('truff-admin/', include('truff_admin_panel.urls')),
 
     # Legal pages (served as standalone HTML)

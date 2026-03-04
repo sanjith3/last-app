@@ -72,9 +72,11 @@ class TurfViewSet(viewsets.ModelViewSet):
             # Admins see all turfs
             return queryset
             
-        # All authenticated users see only approved turfs for public browsing.
-        # Owner turfs are handled by ?my_turfs=true in the list() method.
-        return queryset.filter(status=TurfStatus.APPROVED, is_active=True)
+        # Authenticated users: approved+active turfs for public browsing,
+        # PLUS the user's own turfs at any status (needed for upload_image on pending turfs).
+        return queryset.filter(
+            Q(status=TurfStatus.APPROVED, is_active=True) | Q(owner=user)
+        )
     
     def get_serializer_class(self):
         if self.action == 'create' or self.action == 'update' or self.action == 'partial_update':
@@ -175,6 +177,7 @@ class TurfViewSet(viewsets.ModelViewSet):
     def owner_dashboard_stats(self, request):
         """
         Aggregated stats across all of the owner's turfs.
+        Returns can_manage=False for owners with no approved turfs yet.
         GET /api/turfs/turfs/owner_dashboard_stats/
         """
         from django.db.models import Count, Sum, Avg, Q
@@ -185,9 +188,38 @@ class TurfViewSet(viewsets.ModelViewSet):
         owner_turfs = Turf.objects.filter(owner=user)
         total_turfs = owner_turfs.count()
 
+        # ── Approval gate: no approved turfs → limited response ──────────
+        has_approved_turf = owner_turfs.filter(status=TurfStatus.APPROVED).exists()
+        if not has_approved_turf:
+            pending_count = owner_turfs.filter(status=TurfStatus.PENDING).count()
+            rejected_count = owner_turfs.filter(status=TurfStatus.REJECTED).count()
+            suspended_count = owner_turfs.filter(status=TurfStatus.SUSPENDED).count()
+
+            # Build per-turf status info so Flutter can show details
+            turf_statuses = list(owner_turfs.values(
+                'id', 'name', 'status', 'rejection_reason', 'created_at',
+            ))
+
+            return Response({
+                'success': True,
+                'can_manage': False,
+                'message': (
+                    'Your turf is under review. Our team will approve it within 24–48 hours. '
+                    'You will receive a notification once approved.'
+                    if pending_count > 0 else
+                    'Your turf application was not approved. Please contact support for details.'
+                ),
+                'total_turfs': total_turfs,
+                'pending_count': pending_count,
+                'rejected_count': rejected_count,
+                'suspended_count': suspended_count,
+                'turf_statuses': turf_statuses,
+            })
+
         if total_turfs == 0:
             return Response({
                 'success': True,
+                'can_manage': True,
                 'total_turfs': 0,
                 'total_bookings': 0,
                 'today_bookings': 0,
@@ -215,6 +247,7 @@ class TurfViewSet(viewsets.ModelViewSet):
 
         return Response({
             'success': True,
+            'can_manage': True,
             'total_turfs': total_turfs,
             'total_bookings': agg['total_bookings'] or 0,
             'today_bookings': agg['today_bookings'] or 0,
@@ -222,6 +255,254 @@ class TurfViewSet(viewsets.ModelViewSet):
             'total_revenue': str(agg['total_revenue'] or 0),
             'avg_rating': round(review_agg['avg_rating'] or 0, 1),
         })
+
+    # ─── OWNER: UPDATE TURF DETAILS (LIVE + AUDIT LOG) ───────────────────
+    @action(detail=True, methods=['patch'], permission_classes=[IsAuthenticated],
+            url_path='update_details')
+    def update_details(self, request, pk=None):
+        """
+        Owner updates their turf details. Changes go live immediately.
+        An edit history record is created for admin notification/audit trail.
+        PATCH /api/turfs/turfs/{id}/update_details/
+        """
+        from .models import TurfEditHistory
+
+        turf = self.get_object()
+        if turf.owner != request.user:
+            return Response({'success': False, 'error': 'Not your turf.'}, status=403)
+
+        # ── Capture old values before any changes ──
+        old_values = {
+            'name': turf.name,
+            'description': turf.description or '',
+            'city': turf.city,
+            'state': turf.state,
+            'price_per_hour': str(turf.price_per_hour),
+            'google_maps_share_link': turf.google_maps_share_link or '',
+            'sports': sorted([s.name for s in turf.sports.all()]),
+            'amenities': sorted([a.name for a in turf.amenities.all()]),
+        }
+
+        data = request.data
+
+        # ── Apply scalar field updates ──
+        scalar_fields = ['name', 'description', 'city', 'state', 'price_per_hour', 'google_maps_share_link']
+        for field in scalar_fields:
+            if field in data:
+                setattr(turf, field, data[field])
+        turf.save(update_fields=[f for f in scalar_fields if f in data] or scalar_fields)
+
+        # ── Apply M2M sports ──
+        if 'sports' in data:
+            sport_names = data['sports'] if isinstance(data['sports'], list) else []
+            sport_objs = Sport.objects.filter(name__in=sport_names)
+            turf.sports.set(sport_objs)
+
+        # ── Apply M2M amenities ──
+        if 'amenities' in data:
+            amenity_names = data['amenities'] if isinstance(data['amenities'], list) else []
+            amenity_objs = Amenity.objects.filter(name__in=amenity_names)
+            turf.amenities.set(amenity_objs)
+
+        # ── Capture new values and diff ──
+        new_values = {
+            'name': turf.name,
+            'description': turf.description or '',
+            'city': turf.city,
+            'state': turf.state,
+            'price_per_hour': str(turf.price_per_hour),
+            'google_maps_share_link': turf.google_maps_share_link or '',
+            'sports': sorted([s.name for s in turf.sports.all()]),
+            'amenities': sorted([a.name for a in turf.amenities.all()]),
+        }
+
+        changes = {}
+        for field, old_val in old_values.items():
+            new_val = new_values[field]
+            if old_val != new_val:
+                changes[field] = {'old': old_val, 'new': new_val}
+
+        # ── Record edit history (even if no changes — for audit) ──
+        def get_client_ip(req):
+            x_forwarded = req.META.get('HTTP_X_FORWARDED_FOR')
+            if x_forwarded:
+                return x_forwarded.split(',')[0].strip()
+            return req.META.get('REMOTE_ADDR')
+
+        if changes:
+            TurfEditHistory.objects.create(
+                turf=turf,
+                owner=request.user,
+                changes=changes,
+                ip_address=get_client_ip(request),
+            )
+
+        serializer = TurfDetailSerializer(turf, context={'request': request})
+        return Response({
+            'success': True,
+            'message': 'Turf details updated successfully.' + (
+                ' Admin has been notified of your changes.' if changes else ''
+            ),
+            'changes_recorded': len(changes),
+            'turf': serializer.data,
+        })
+
+    # ─── PHOTO MANAGEMENT ACTIONS ────────────────────────────────────────────
+
+    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated],
+            url_path='fetch_images')
+    def fetch_images(self, request, pk=None):
+        """
+        Return all TurfImage records with real IDs for this turf.
+        GET /api/turfs/turfs/{id}/fetch_images/
+        Used by Flutter edit screen to get real image IDs for delete/set-cover.
+        """
+        from .models import TurfImage
+        turf = self.get_object()
+        images = TurfImage.objects.filter(turf=turf).order_by('-is_cover', 'id')
+        data = []
+        for img in images:
+            data.append({
+                'image_id': img.id,
+                'image_url': request.build_absolute_uri(img.image.url),
+                'is_cover': img.is_cover,
+                'caption': img.caption or '',
+            })
+        return Response({'success': True, 'images': data, 'count': len(data)})
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated],
+            url_path='upload_image')
+    def upload_image(self, request, pk=None):
+        """
+        Upload a new photo for the turf.
+        POST /api/turfs/turfs/{id}/upload_image/   (multipart/form-data, field='image')
+        """
+        from .models import TurfImage, TurfEditHistory
+
+        turf = self.get_object()
+        if turf.owner != request.user:
+            return Response({'success': False, 'error': 'Not your turf.'}, status=403)
+
+        if 'image' not in request.FILES:
+            return Response({'success': False, 'error': 'No image file provided.'}, status=400)
+
+        image_file = request.FILES['image']
+
+        # Basic MIME validation
+        allowed_types = {'image/jpeg', 'image/jpg', 'image/png', 'image/webp'}
+        ct = getattr(image_file, 'content_type', '').lower()
+        if ct not in allowed_types:
+            return Response({'success': False, 'error': 'Invalid file type. Use JPEG, PNG or WEBP.'}, status=400)
+
+        # First image becomes cover automatically
+        is_first = not TurfImage.objects.filter(turf=turf).exists()
+
+        turf_image = TurfImage.objects.create(
+            turf=turf,
+            image=image_file,
+            caption=request.data.get('caption', ''),
+            is_cover=is_first,
+        )
+
+        # Audit log
+        def _get_ip(req):
+            x = req.META.get('HTTP_X_FORWARDED_FOR')
+            return x.split(',')[0].strip() if x else req.META.get('REMOTE_ADDR')
+
+        TurfEditHistory.objects.create(
+            turf=turf,
+            owner=request.user,
+            changes={'action': 'image_added', 'image_id': turf_image.id, 'is_cover': is_first},
+            ip_address=_get_ip(request),
+        )
+
+        return Response({
+            'success': True,
+            'image_id': turf_image.id,
+            'image_url': request.build_absolute_uri(turf_image.image.url),
+            'is_cover': turf_image.is_cover,
+        }, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['delete'], permission_classes=[IsAuthenticated],
+            url_path=r'delete_image/(?P<image_id>\d+)')
+    def delete_image(self, request, pk=None, image_id=None):
+        """
+        Delete a photo by its ID.
+        DELETE /api/turfs/turfs/{id}/delete_image/{image_id}/
+        """
+        from .models import TurfImage, TurfEditHistory
+
+        turf = self.get_object()
+        if turf.owner != request.user:
+            return Response({'success': False, 'error': 'Not your turf.'}, status=403)
+
+        try:
+            img = TurfImage.objects.get(id=image_id, turf=turf)
+        except TurfImage.DoesNotExist:
+            return Response({'success': False, 'error': 'Image not found.'}, status=404)
+
+        was_cover = img.is_cover
+        img_id_saved = img.id
+
+        # Delete the file + DB record
+        img.image.delete(save=False)
+        img.delete()
+
+        # If the deleted image was the cover, promote the next one
+        if was_cover:
+            next_img = TurfImage.objects.filter(turf=turf).first()
+            if next_img:
+                next_img.is_cover = True
+                next_img.save(update_fields=['is_cover'])
+
+        def _get_ip(req):
+            x = req.META.get('HTTP_X_FORWARDED_FOR')
+            return x.split(',')[0].strip() if x else req.META.get('REMOTE_ADDR')
+
+        TurfEditHistory.objects.create(
+            turf=turf,
+            owner=request.user,
+            changes={'action': 'image_deleted', 'image_id': img_id_saved, 'was_cover': was_cover},
+            ip_address=_get_ip(request),
+        )
+
+        return Response({'success': True, 'message': 'Photo deleted.'})
+
+    @action(detail=True, methods=['patch'], permission_classes=[IsAuthenticated],
+            url_path=r'set_cover/(?P<image_id>\d+)')
+    def set_cover_image(self, request, pk=None, image_id=None):
+        """
+        Set a photo as the cover image.
+        PATCH /api/turfs/turfs/{id}/set_cover/{image_id}/
+        """
+        from .models import TurfImage, TurfEditHistory
+
+        turf = self.get_object()
+        if turf.owner != request.user:
+            return Response({'success': False, 'error': 'Not your turf.'}, status=403)
+
+        try:
+            new_cover = TurfImage.objects.get(id=image_id, turf=turf)
+        except TurfImage.DoesNotExist:
+            return Response({'success': False, 'error': 'Image not found.'}, status=404)
+
+        # Clear existing covers, set new one
+        TurfImage.objects.filter(turf=turf, is_cover=True).update(is_cover=False)
+        new_cover.is_cover = True
+        new_cover.save(update_fields=['is_cover'])
+
+        def _get_ip(req):
+            x = req.META.get('HTTP_X_FORWARDED_FOR')
+            return x.split(',')[0].strip() if x else req.META.get('REMOTE_ADDR')
+
+        TurfEditHistory.objects.create(
+            turf=turf,
+            owner=request.user,
+            changes={'action': 'cover_changed', 'new_cover_id': new_cover.id},
+            ip_address=_get_ip(request),
+        )
+
+        return Response({'success': True, 'message': 'Cover image updated.'})
 
     def retrieve(self, request, *args, **kwargs):
         """
@@ -790,4 +1071,85 @@ class TurfViewSet(viewsets.ModelViewSet):
             'success': True,
             'message': f'{count} offer(s) deactivated',
             'slot_id': slot.id,
+        }, status=status.HTTP_200_OK)
+
+    # ─── OWNER: CROP / REPLACE IMAGE ──────────────────────────────────────────
+
+    @action(detail=True, methods=['post'], url_path='crop_image')
+    def crop_image(self, request, pk=None):
+        """
+        Replace an image with its cropped version and save optional crop metadata.
+        POST /api/turfs/turfs/{id}/crop_image/
+        Multipart body:
+          image_id  — int, required
+          image     — file, required (already-cropped JPEG from Flutter)
+          crop_x    — float 0-1 (optional metadata)
+          crop_y    — float 0-1
+          crop_width
+          crop_height
+        """
+        turf = self.get_object()
+
+        if turf.owner != request.user:
+            return Response(
+                {'success': False, 'error': 'You can only edit your own turf images'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        image_id = request.data.get('image_id')
+        if not image_id:
+            return Response(
+                {'success': False, 'error': 'image_id is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            turf_image = TurfImage.objects.get(id=image_id, turf=turf)
+        except TurfImage.DoesNotExist:
+            return Response(
+                {'success': False, 'error': 'Image not found for this turf'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Replace the image file with the uploaded cropped version
+        if 'image' in request.FILES:
+            if turf_image.image:
+                try:
+                    turf_image.image.delete(save=False)
+                except Exception:
+                    pass  # storage errors are non-fatal
+            turf_image.image = request.FILES['image']
+
+        # Persist optional crop metadata
+        for field in ('crop_x', 'crop_y', 'crop_width', 'crop_height'):
+            if field in request.data:
+                try:
+                    setattr(turf_image, field, float(request.data[field]))
+                except (ValueError, TypeError):
+                    pass
+
+        turf_image.save()
+
+        # Build absolute URL for the response
+        image_url = None
+        if turf_image.image:
+            try:
+                image_url = request.build_absolute_uri(turf_image.image.url)
+            except Exception:
+                image_url = turf_image.image.url
+
+        logger.info(
+            f"Image #{turf_image.id} cropped by {request.user.username} on turf {turf.id}"
+        )
+
+        return Response({
+            'success': True,
+            'image_id': turf_image.id,
+            'image_url': image_url,
+            'crop_settings': {
+                'x': turf_image.crop_x,
+                'y': turf_image.crop_y,
+                'width': turf_image.crop_width,
+                'height': turf_image.crop_height,
+            },
         }, status=status.HTTP_200_OK)

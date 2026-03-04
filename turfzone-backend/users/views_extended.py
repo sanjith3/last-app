@@ -13,7 +13,7 @@ from datetime import timedelta
 from django.conf import settings
 from django.utils import timezone
 from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 
@@ -586,3 +586,211 @@ class OwnerBankDetailsViewSet(viewsets.ViewSet):
             'bank_name': owner.bank_name,
             'bank_verified': owner.bank_verified,
         })
+
+
+# ---------------------------------------------------------------------------
+# Coupon Validation — /api/coupons/validate/
+# Flutter-compatible endpoint (uses `amount` param, returns `discount` key)
+# ---------------------------------------------------------------------------
+
+from rest_framework.decorators import api_view, permission_classes
+from decimal import Decimal, InvalidOperation
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def validate_coupon(request):
+    """
+    Validate a promo/coupon code for the Flutter payment summary screen.
+
+    POST /api/coupons/validate/
+    Body: {"code": "WEEKEND20", "amount": "999.00", "turf_id": 1}
+
+    Response (valid):
+        {"valid": true, "discount": "199.80", "message": "Coupon applied!",
+         "code": "WEEKEND20", "discount_type": "percentage", "discount_value": "20.00"}
+
+    Response (invalid):
+        {"valid": false, "message": "Promo code has expired"}
+    """
+    code = request.data.get('code', '').strip().upper()
+    turf_id = request.data.get('turf_id')
+
+    # Accept both `amount` (Flutter) and `order_value` (legacy)
+    raw_amount = request.data.get('amount') or request.data.get('order_value', '0')
+    try:
+        amount = Decimal(str(raw_amount)).quantize(Decimal('0.01'))
+    except (InvalidOperation, TypeError):
+        amount = Decimal('0')
+
+    if not code:
+        return Response({'valid': False, 'message': 'Please enter a coupon code'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    # ── Lookup ──
+    try:
+        promo = PromoCode.objects.get(code=code)
+    except PromoCode.DoesNotExist:
+        return Response({'valid': False, 'message': 'Invalid coupon code'},
+                        status=status.HTTP_200_OK)  # 200 so Flutter reads the message
+
+    # ── Validity checks — return clear human-readable messages ──
+    now = timezone.now()
+    if not promo.is_active:
+        return Response({'valid': False, 'message': 'This coupon is inactive'},
+                        status=status.HTTP_200_OK)
+    if now < promo.valid_from:
+        return Response({'valid': False, 'message': 'This coupon is not active yet'},
+                        status=status.HTTP_200_OK)
+    if now > promo.valid_until:
+        return Response({'valid': False, 'message': 'This coupon has expired'},
+                        status=status.HTTP_200_OK)
+    if promo.current_uses >= promo.max_uses:
+        return Response({'valid': False, 'message': 'This coupon has reached its usage limit'},
+                        status=status.HTTP_200_OK)
+    if amount < promo.min_order_value:
+        return Response({
+            'valid': False,
+            'message': f'Minimum order value of \u20b9{promo.min_order_value:.0f} required',
+        }, status=status.HTTP_200_OK)
+
+
+    # -- Per-user usage check (one coupon per user) --
+    from .models import CouponUsage
+    if CouponUsage.objects.filter(user=request.user, coupon=promo).exists():
+        return Response(
+            {'valid': False, 'message': 'You have already used this coupon'},
+            status=status.HTTP_200_OK,
+        )
+
+    # ── Optional turf restriction ──
+    if turf_id:
+        applicable = promo.applicable_turfs.all() if hasattr(promo, 'applicable_turfs') else []
+        if applicable and not promo.applicable_turfs.filter(id=turf_id).exists():
+            return Response({'valid': False, 'message': 'Coupon not valid for this turf'},
+                            status=status.HTTP_200_OK)
+
+    # ── Calculate discount ──
+    if promo.discount_type == 'percentage':
+        discount = (amount * promo.discount_value / Decimal('100')).quantize(Decimal('0.01'))
+        if promo.max_discount:
+            discount = min(discount, promo.max_discount)
+    else:
+        discount = min(promo.discount_value, amount)
+
+    discount = discount.quantize(Decimal('0.01'))
+
+    return Response({
+        'valid': True,
+        'discount': str(discount),          # key Flutter's _applyCoupon reads
+        'discount_amount': str(discount),   # for backward compat
+        'message': 'Coupon applied successfully!',
+        'code': promo.code,
+        'discount_type': promo.discount_type,
+        'discount_value': str(promo.discount_value),
+        'min_order_value': str(promo.min_order_value),
+        'final_amount': str((amount - discount).quantize(Decimal('0.01'))),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Available Offers — /api/coupons/available/
+# Returns only coupons the current user has NOT yet used
+# ---------------------------------------------------------------------------
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_available_offers(request):
+    """
+    GET /api/coupons/available/?amount=999.00
+
+    Returns active coupons applicable to the requesting user:
+      - Not expired
+      - Global usage limit not exceeded
+      - Not already used by THIS user (CouponUsage check)
+      - Optionally filtered: amount >= min_order_value (when ?amount= provided)
+    """
+    from .models import CouponUsage
+    now = timezone.now()
+    user = request.user
+
+    # Optional amount filter
+    raw_amount = request.query_params.get('amount', None)
+    try:
+        order_amount = Decimal(str(raw_amount)).quantize(Decimal('0.01')) if raw_amount else None
+    except (InvalidOperation, TypeError):
+        order_amount = None
+
+    # 1. All active, date-valid coupons that still have global uses left
+    qs = PromoCode.objects.filter(
+        is_active=True,
+        valid_from__lte=now,
+        valid_until__gte=now,
+    ).exclude(
+        # Exclude coupons at global usage cap
+        current_uses__gte=models.F('max_uses'),
+    )
+
+    # 2. Exclude coupons this user already used
+    used_ids = CouponUsage.objects.filter(user=user).values_list('coupon_id', flat=True)
+    qs = qs.exclude(id__in=used_ids)
+
+    # 3. Build response
+    offers = []
+    for coupon in qs.order_by('valid_until'):
+        # Skip if amount is known and below min_order
+        if order_amount is not None and order_amount < coupon.min_order_value:
+            continue
+
+        # Human-readable saving string (e.g. "₹50 off" or "20% off")
+        if coupon.discount_type == 'percentage':
+            saving = f"{coupon.discount_value:.0f}% off"
+            if coupon.max_discount:
+                saving += f" (up to ₹{coupon.max_discount:.0f})"
+        else:
+            saving = f"₹{coupon.discount_value:.0f} off"
+
+        # Description fallback
+        desc = (
+            f"Min order ₹{coupon.min_order_value:.0f}"
+            if coupon.min_order_value > 0
+            else "No minimum order"
+        )
+
+        offers.append({
+            'code': coupon.code,
+            'saving': saving,
+            'desc': desc,
+            'discount_type': coupon.discount_type,
+            'discount_value': str(coupon.discount_value),
+            'min_order_value': str(coupon.min_order_value),
+            'valid_until': coupon.valid_until.isoformat(),
+        })
+
+    return Response({'success': True, 'offers': offers})
+
+
+# ---------------------------------------------------------------------------
+# FCM Token Registration — POST /api/coupons/fcm-token/
+# ---------------------------------------------------------------------------
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def register_fcm_token(request):
+    """
+    POST /api/users/fcm-token/
+    Body: { "fcm_token": "<device_token>" }
+
+    Saves (or updates) the FCM registration token for the current user.
+    Called by Flutter on every app launch after Firebase.initializeApp().
+    """
+    token = request.data.get('fcm_token', '').strip()
+    if not token:
+        return Response({'success': False, 'error': 'fcm_token is required'}, status=400)
+
+    request.user.fcm_token = token
+    request.user.save(update_fields=['fcm_token'])
+
+    return Response({'success': True, 'message': 'FCM token registered.'})
+
+

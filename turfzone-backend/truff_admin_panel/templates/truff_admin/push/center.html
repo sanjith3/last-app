@@ -1,0 +1,722 @@
+{% extends "truff_admin/base.html" %}
+
+{% block content %}
+<style>
+    /* ─── Design Tokens ──────────────────────────────────────────── */
+    .nc *,
+    :root {
+        --g: #16a34a;
+        --gd: #15803d;
+        --gl: #f0fdf4;
+        --gm: #bbf7d0;
+        --ink: #0f172a;
+        --sub: #64748b;
+        --dim: #94a3b8;
+        --bdr: #e2e8f0;
+        --bg: #f8fafc;
+        --wh: #ffffff;
+        --r: 12px;
+        --rs: 8px;
+    }
+
+    /* ─── Layout ─────────────────────────────────────────────────── */
+    .nc {
+        font-family: 'Inter', -apple-system, sans-serif;
+        color: var(--ink);
+    }
+
+    .nc label {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: .7px;
+        text-transform: uppercase;
+        color: var(--sub);
+    }
+
+    /* ─── Cards ──────────────────────────────────────────────────── */
+    .card-c {
+        background: var(--wh);
+        border: 1px solid var(--bdr);
+        border-radius: var(--r);
+        overflow: hidden;
+    }
+
+    .card-c+.card-c,
+    .card-c+.row,
+    .row+.card-c {
+        margin-top: 20px;
+    }
+
+    .ch {
+        padding: 15px 22px;
+        border-bottom: 1px solid var(--bdr);
+        font-size: 13px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: #fcfcfd;
+    }
+
+    .cb {
+        padding: 22px;
+    }
+
+    /* ─── Stat cards ─────────────────────────────────────────────── */
+    .sc {
+        background: var(--wh);
+        border: 1px solid var(--bdr);
+        border-radius: var(--r);
+        padding: 22px;
+        transition: .2s;
+    }
+
+    .sc:hover {
+        border-color: #94a3b8;
+        box-shadow: 0 4px 16px rgba(15, 23, 42, .07);
+        transform: translateY(-2px);
+    }
+
+    .sc-ico {
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        margin-bottom: 14px;
+    }
+
+    .sc-n {
+        font-size: 26px;
+        font-weight: 800;
+        color: var(--ink);
+        line-height: 1;
+        letter-spacing: -.5px;
+    }
+
+    .sc-l {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: .6px;
+        text-transform: uppercase;
+        color: var(--sub);
+        margin-top: 3px;
+    }
+
+    .sc-s {
+        font-size: 12px;
+        color: var(--dim);
+        margin-top: 4px;
+    }
+
+    /* ─── Inputs ─────────────────────────────────────────────────── */
+    .fi {
+        width: 100%;
+        border: 1.5px solid var(--bdr);
+        border-radius: var(--rs);
+        padding: 10px 13px;
+        font-size: 14px;
+        outline: none;
+        background: var(--wh);
+        color: var(--ink);
+        transition: .15s;
+        font-family: inherit;
+    }
+
+    .fi:focus {
+        border-color: var(--g);
+        box-shadow: 0 0 0 3px rgba(22, 163, 74, .1);
+    }
+
+    .fi::placeholder {
+        color: #cbd5e1;
+    }
+
+    /* ─── Audience cards ─────────────────────────────────────────── */
+    .ac {
+        background: var(--wh);
+        border: 1.5px solid var(--bdr);
+        border-radius: var(--r);
+        padding: 16px 14px;
+        cursor: pointer;
+        transition: .15s;
+        height: 100%;
+        position: relative;
+    }
+
+    .ac:hover {
+        border-color: var(--g);
+        background: var(--gl);
+    }
+
+    .ac.on {
+        border-color: var(--g);
+        background: var(--gl);
+        box-shadow: 0 0 0 2px rgba(22, 163, 74, .18);
+    }
+
+    .ac.on::after {
+        content: '✓';
+        position: absolute;
+        top: 9px;
+        right: 11px;
+        font-size: 11px;
+        font-weight: 800;
+        color: var(--g);
+    }
+
+    .ac input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    .ac-em {
+        font-size: 20px;
+        margin-bottom: 8px;
+        display: block;
+    }
+
+    .ac-t {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--ink);
+        margin-bottom: 5px;
+    }
+
+    .ac-n {
+        font-size: 20px;
+        font-weight: 800;
+        color: var(--g);
+        line-height: 1;
+    }
+
+    .ac-s {
+        font-size: 11px;
+        color: var(--dim);
+        margin-top: 2px;
+    }
+
+    /* ─── Phone mockup ───────────────────────────────────────────── */
+    .phone {
+        background: #18181b;
+        border-radius: 26px;
+        padding: 18px 14px;
+        width: 100%;
+        max-width: 240px;
+        margin: 0 auto;
+    }
+
+    .p-status {
+        font-size: 10px;
+        color: rgba(255, 255, 255, .3);
+        margin-bottom: 12px;
+        display: flex;
+        justify-content: space-between;
+    }
+
+    .p-notif {
+        background: rgba(255, 255, 255, .1);
+        backdrop-filter: blur(16px);
+        border-radius: 12px;
+        padding: 12px;
+    }
+
+    .p-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 7px;
+    }
+
+    .p-logo {
+        width: 22px;
+        height: 22px;
+        border-radius: 6px;
+        background: var(--g);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        flex-shrink: 0;
+    }
+
+    .p-app {
+        font-size: 10px;
+        color: rgba(255, 255, 255, .5);
+    }
+
+    .p-time {
+        font-size: 10px;
+        color: rgba(255, 255, 255, .35);
+        margin-left: auto;
+    }
+
+    .p-title {
+        font-size: 12px;
+        font-weight: 700;
+        color: #fff;
+        margin-bottom: 3px;
+    }
+
+    .p-body {
+        font-size: 11px;
+        color: rgba(255, 255, 255, .65);
+        line-height: 1.4;
+    }
+
+    .p-bar {
+        height: 3px;
+        background: rgba(255, 255, 255, .08);
+        border-radius: 99px;
+        width: 33%;
+        margin: 14px auto 0;
+    }
+
+    /* ─── Progress ───────────────────────────────────────────────── */
+    .pb {
+        height: 4px;
+        background: #f1f5f9;
+        border-radius: 99px;
+        overflow: hidden;
+        margin-top: 6px;
+    }
+
+    .pb-f {
+        height: 100%;
+        border-radius: 99px;
+        background: var(--g);
+    }
+
+    /* ─── Table ──────────────────────────────────────────────────── */
+    .nt {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .nt th {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: .7px;
+        text-transform: uppercase;
+        color: var(--sub);
+        padding: 10px 18px;
+        background: #f8fafc;
+        border-bottom: 1px solid var(--bdr);
+        text-align: left;
+    }
+
+    .nt td {
+        padding: 13px 18px;
+        font-size: 13px;
+        border-bottom: 1px solid #f1f5f9;
+        vertical-align: middle;
+    }
+
+    .nt tr:last-child td {
+        border: none;
+    }
+
+    .nt tr:hover td {
+        background: #f8fafc;
+    }
+
+    .tag {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 9px;
+        border-radius: 99px;
+        font-size: 11px;
+        font-weight: 600;
+    }
+
+    .tg {
+        background: #dcfce7;
+        color: #166534;
+    }
+
+    .ts {
+        background: #f1f5f9;
+        color: var(--sub);
+    }
+
+    .tw {
+        background: #fef3c7;
+        color: #92400e;
+    }
+
+    /* ─── Buttons ────────────────────────────────────────────────── */
+    .btn-p {
+        background: var(--g);
+        color: #fff;
+        border: none;
+        border-radius: var(--rs);
+        padding: 11px 26px;
+        font-weight: 700;
+        font-size: 14px;
+        cursor: pointer;
+        transition: .15s;
+        letter-spacing: -.1px;
+    }
+
+    .btn-p:hover {
+        background: var(--gd);
+        box-shadow: 0 5px 16px rgba(22, 163, 74, .32);
+        transform: translateY(-1px);
+    }
+
+    .btn-s {
+        background: var(--wh);
+        color: var(--sub);
+        border: 1.5px solid var(--bdr);
+        border-radius: var(--rs);
+        padding: 11px 20px;
+        font-weight: 600;
+        font-size: 13px;
+        cursor: pointer;
+        transition: .15s;
+    }
+
+    .btn-s:hover {
+        background: #f8fafc;
+    }
+
+    /* ─── Badge ──────────────────────────────────────────────────── */
+    .badge-live {
+        background: #dcfce7;
+        color: var(--g);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: .4px;
+        padding: 3px 9px;
+        border-radius: 99px;
+        border: 1px solid var(--gm);
+    }
+</style>
+
+<div class="nc">
+
+    {% if messages %}{% for m in messages %}
+    <div class="alert alert-{{ m.tags }} alert-dismissible fade show mb-4">{{ m }}<button type="button"
+            class="btn-close" data-bs-dismiss="alert"></button></div>
+    {% endfor %}{% endif %}
+
+    <!-- PAGE HEADER -->
+    <div class="d-flex justify-content-between align-items-start mb-4">
+        <div>
+            <div class="d-flex align-items-center gap-2 mb-1">
+                <h2 style="font-size:21px;font-weight:800;color:var(--ink);margin:0;">Notification Center</h2>
+                <span class="badge-live">● Live</span>
+            </div>
+            <p style="font-size:13px;color:var(--sub);margin:0;">Send targeted push notifications · Firebase Cloud
+                Messaging</p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{% url 'truff_admin:push_list' %}" class="btn-s"
+                style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;">📋 History</a>
+        </div>
+    </div>
+
+    <!-- STAT CARDS -->
+    <div class="row g-3 mb-3">
+        <div class="col-6 col-xl-3">
+            <div class="sc">
+                <div class="sc-ico" style="background:#dcfce7;">📱</div>
+                <div class="sc-n">{{ device_stats.total }}</div>
+                <div class="sc-l">Registered Devices</div>
+                <div class="sc-s">{{ audience_stats.all_users }} active users total</div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="sc">
+                <div class="sc-ico" style="background:#dbeafe;">📤</div>
+                <div class="sc-n">{{ stats.total_sent }}</div>
+                <div class="sc-l">Notifications Sent</div>
+                <div class="sc-s">{{ stats.total_success }} delivered</div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="sc">
+                <div class="sc-ico" style="background:#fef3c7;">📈</div>
+                <div class="sc-n">{{ stats.success_rate|floatformat:0 }}%</div>
+                <div class="sc-l">Delivery Rate</div>
+                <div class="sc-s">{{ stats.total_failure }} failed</div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="sc">
+                <div class="sc-ico" style="background:#ede9fe;">👥</div>
+                <div class="sc-n">{{ audience_stats.customers }}&nbsp;<span
+                        style="font-size:16px;color:var(--dim);">/</span>&nbsp;{{ audience_stats.owners }}</div>
+                <div class="sc-l">Customers / Owners</div>
+                <div class="sc-s">{{ audience_stats.recent_bookers }} booked this month</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- COMPOSE FORM -->
+    <form method="post" action="{% url 'truff_admin:push_send' %}" id="ncF">
+        {% csrf_token %}
+        <input type="hidden" name="notification_type" value="announcement">
+
+        <!-- MESSAGE + PREVIEW -->
+        <div class="card-c">
+            <div class="ch">✏️ Compose Message</div>
+            <div class="cb">
+                <div class="row g-4">
+                    <!-- Inputs -->
+                    <div class="col-lg-7">
+                        <div class="mb-3">
+                            <label class="d-block mb-1">Title <span style="color:#ef4444;">*</span></label>
+                            <input type="text" name="title" id="iT" class="fi"
+                                placeholder="e.g. Weekend Special — 20% off!" required maxlength="255" oninput="pv()">
+                        </div>
+                        <div>
+                            <label class="d-block mb-1">Message <span style="color:#ef4444;">*</span></label>
+                            <textarea name="body" id="iB" class="fi" rows="4"
+                                placeholder="Your push notification message…" required oninput="pv()"></textarea>
+                        </div>
+                    </div>
+                    <!-- Phone preview -->
+                    <div class="col-lg-5 d-flex flex-column align-items-center justify-content-center">
+                        <p
+                            style="font-size:11px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--dim);margin-bottom:12px;">
+                            Live Preview</p>
+                        <div class="phone">
+                            <div class="p-status"><span>9:41 AM</span><span>◾◾◾</span></div>
+                            <div class="p-notif">
+                                <div class="p-row">
+                                    <div class="p-logo">🏟</div>
+                                    <span class="p-app">TurfZone</span>
+                                    <span class="p-time">now</span>
+                                </div>
+                                <div class="p-title" id="pvT">Your notification title</div>
+                                <div class="p-body" id="pvB">Your message will appear here…</div>
+                            </div>
+                            <div class="p-bar"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- AUDIENCE -->
+        <div class="card-c">
+            <div class="ch">🎯 Target Audience</div>
+            <div class="cb">
+                <div class="row g-3 mb-3">
+
+                    <div class="col-6 col-md-4 col-xl-2">
+                        <div class="ac on" id="aa_all" onclick="pick('all','aa_all','r_all')">
+                            <input type="radio" name="target_type" value="all" id="r_all" checked>
+                            <span class="ac-em">👥</span>
+                            <div class="ac-t">All Users</div>
+                            <div class="ac-n">{{ device_stats.total }}</div>
+                            <div class="ac-s">{{ audience_stats.all_users }} users</div>
+                        </div>
+                    </div>
+
+                    <div class="col-6 col-md-4 col-xl-2">
+                        <div class="ac" id="aa_owners" onclick="pick('owners','aa_owners','r_owners')">
+                            <input type="radio" name="target_type" value="owners" id="r_owners">
+                            <span class="ac-em">👑</span>
+                            <div class="ac-t">Turf Owners</div>
+                            <div class="ac-n">{{ device_stats.by_audience.owners }}</div>
+                            <div class="ac-s">{{ audience_stats.owners }} users</div>
+                        </div>
+                    </div>
+
+                    <div class="col-6 col-md-4 col-xl-2">
+                        <div class="ac" id="aa_customers" onclick="pick('customers','aa_customers','r_customers')">
+                            <input type="radio" name="target_type" value="customers" id="r_customers">
+                            <span class="ac-em">🧑</span>
+                            <div class="ac-t">Customers</div>
+                            <div class="ac-n">{{ device_stats.by_audience.customers }}</div>
+                            <div class="ac-s">{{ audience_stats.customers }} users</div>
+                        </div>
+                    </div>
+
+                    <div class="col-6 col-md-4 col-xl-2">
+                        <div class="ac" id="aa_recent_bookers"
+                            onclick="pick('recent_bookers','aa_recent_bookers','r_recent_bookers')">
+                            <input type="radio" name="target_type" value="recent_bookers" id="r_recent_bookers">
+                            <span class="ac-em">📅</span>
+                            <div class="ac-t">Recent Bookers</div>
+                            <div class="ac-n">{{ device_stats.by_audience.recent }}</div>
+                            <div class="ac-s">last 30 days</div>
+                        </div>
+                    </div>
+
+                    <div class="col-6 col-md-4 col-xl-2">
+                        <div class="ac" id="aa_inactive" onclick="pick('inactive','aa_inactive','r_inactive')">
+                            <input type="radio" name="target_type" value="inactive" id="r_inactive">
+                            <span class="ac-em">💤</span>
+                            <div class="ac-t">Inactive</div>
+                            <div class="ac-n">{{ device_stats.by_audience.inactive }}</div>
+                            <div class="ac-s">{{ audience_stats.inactive }} users</div>
+                        </div>
+                    </div>
+
+                    <div class="col-6 col-md-4 col-xl-2">
+                        <div class="ac" id="aa_token" onclick="pick('token','aa_token','r_token')">
+                            <input type="radio" name="target_type" value="token" id="r_token">
+                            <span class="ac-em">🎯</span>
+                            <div class="ac-t">Single Device</div>
+                            <div class="ac-n" style="font-size:14px;color:var(--sub);">Test</div>
+                            <div class="ac-s">FCM token</div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div id="tkWrap" class="d-none mt-1">
+                    <label class="d-block mb-1">FCM Token</label>
+                    <textarea name="device_token" class="fi font-monospace" rows="2"
+                        placeholder="Paste full FCM token from Flutter logs…"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- OPTIONS + BREAKDOWN (side by side) -->
+        <div class="row g-3">
+            <!-- Options -->
+            <div class="col-lg-7">
+                <div class="card-c">
+                    <div class="ch">⚙️ Options <span style="font-size:11px;color:var(--dim);font-weight:400;">—
+                            optional</span></div>
+                    <div class="cb">
+                        <div class="row g-3">
+                            <div class="col-sm-6">
+                                <label class="d-block mb-1">Promo Code</label>
+                                <input type="text" name="promo_code" class="fi" placeholder="WEEKEND20"
+                                    oninput="this.value=this.value.toUpperCase()">
+                            </div>
+                            <div class="col-sm-6">
+                                <label class="d-block mb-1">Deep Link</label>
+                                <input type="text" name="route" class="fi" placeholder="offers / home / booking">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Breakdown -->
+            <div class="col-lg-5">
+                <div class="card-c h-100">
+                    <div class="ch">📊 Device Breakdown</div>
+                    <div class="cb">
+                        {% if device_stats.total > 0 %}
+                        {% for lbl,val,cls in breakdown_rows %}
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between" style="font-size:12px;margin-bottom:3px;"><span
+                                    style="color:var(--sub);">{{ lbl }}</span><span style="font-weight:700;">{{ val
+                                    }}</span></div>
+                            <div class="pb">
+                                <div class="pb-f {{ cls }}" style="width:{% widthratio val device_stats.total 100 %}%;">
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                        {% else %}
+                        <p style="font-size:13px;color:var(--dim);text-align:center;padding:12px 0;margin:0;">No devices
+                            registered yet — tokens auto-register on login.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SEND BAR -->
+        <div class="d-flex justify-content-end gap-2 mt-3">
+            <button type="reset" class="btn-s" onclick="setTimeout(pvReset,0)">Clear</button>
+            <button type="submit" class="btn-p">📤 &nbsp;Send Notification</button>
+        </div>
+
+    </form>
+
+    <!-- RECENT ACTIVITY -->
+    <div class="card-c">
+        <div class="ch">
+            <span>📋 Recent Activity</span>
+            <a href="{% url 'truff_admin:push_list' %}"
+                style="font-size:12px;font-weight:600;color:var(--g);text-decoration:none;">View all →</a>
+        </div>
+        <table class="nt">
+            <thead>
+                <tr>
+                    <th>When</th>
+                    <th>Notification</th>
+                    <th>Audience</th>
+                    <th style="text-align:right;">Sent</th>
+                    <th style="text-align:right;">Failed</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for n in recent_notifs %}
+                <tr>
+                    <td style="color:var(--dim);white-space:nowrap;font-size:12px;">{{ n.created_at|timesince }} ago
+                    </td>
+                    <td style="font-weight:600;">{{ n.title|truncatechars:42 }}</td>
+                    <td><span class="tag ts">{{ n.get_target_type_display }}</span></td>
+                    <td style="text-align:right;font-weight:700;color:#16a34a;">{{ n.success_count }}</td>
+                    <td
+                        style="text-align:right;color:{% if n.failure_count > 0 %}#ef4444{% else %}var(--dim){% endif %};">
+                        {{ n.failure_count }}</td>
+                    <td>{% if n.is_sent %}<span class="tag tg">✓ Sent</span>{% else %}<span
+                            class="tag tw">Pending</span>{% endif %}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="6" style="text-align:center;padding:50px 20px;color:var(--dim);">
+                        <div style="font-size:36px;margin-bottom:8px;">🔔</div>
+                        No notifications yet — compose one above!
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- TIPS (collapsible) -->
+    <div class="card-c">
+        <div class="ch" id="tipH" style="cursor:pointer;" onclick="tipT()">
+            <span>💡 Pro Tips</span>
+            <span id="tipA" style="font-size:11px;color:var(--dim);">▼ expand</span>
+        </div>
+        <div id="tipB" style="display:none;" class="cb">
+            <div class="row g-2" style="font-size:13px;color:#334155;">
+                <div class="col-md-6">✅ <strong>Recent Bookers</strong> — highest engagement, ideal for weekend promos
+                </div>
+                <div class="col-md-6">✅ <strong>Inactive Users</strong> — win back with a promo code offer</div>
+                <div class="col-md-6">✅ <strong>Promo Code</strong> auto-opens the Offers screen in the app</div>
+                <div class="col-md-6">✅ <strong>Tokens auto-register</strong> on every login — zero manual work</div>
+            </div>
+        </div>
+    </div>
+
+</div><!-- /nc -->
+
+<script>
+    function pv() {
+        document.getElementById('pvT').textContent = document.getElementById('iT').value || 'Your notification title';
+        document.getElementById('pvB').textContent = document.getElementById('iB').value || 'Your message will appear here…';
+    }
+    function pvReset() {
+        document.getElementById('pvT').textContent = 'Your notification title';
+        document.getElementById('pvB').textContent = 'Your message will appear here…';
+    }
+    function pick(v, cid, rid) {
+        document.querySelectorAll('.nc .ac').forEach(c => c.classList.remove('on'));
+        document.getElementById(cid).classList.add('on');
+        document.getElementById(rid).checked = true;
+        document.getElementById('tkWrap').classList.toggle('d-none', v !== 'token');
+    }
+    function tipT() {
+        const b = document.getElementById('tipB'), open = b.style.display === 'block';
+        b.style.display = open ? 'none' : 'block';
+        document.getElementById('tipA').textContent = open ? '▼ expand' : '▲ collapse';
+    }
+</script>
+{% endblock %}

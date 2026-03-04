@@ -1,18 +1,66 @@
 {% extends "truff_admin/base.html" %}
 {% load truff_tags %}
 
-{% block title %}{{ turf.name }} - Truff-Admin{% endblock %}
+{% block title %}{{ turf.name }} — Truff-Admin{% endblock %}
 
 {% block content %}
 <div class="topbar">
-    <h1>{{ turf.name }}</h1>
+    <h1>
+        {{ turf.name }}
+        <span class="badge {{ turf.status|status_badge }}"
+            style="font-size:14px;vertical-align:middle;margin-left:8px;">{{ turf.status|upper }}</span>
+    </h1>
     <div class="topbar-actions">
-        <a href="/truff-admin/turfs/" class="btn btn-outline btn-sm">&#8592; Back to List</a>
+        <a href="/truff-admin/turfs/pending/" class="btn btn-outline btn-sm">← Pending Queue</a>
+        <a href="/truff-admin/turfs/" class="btn btn-outline btn-sm">All Turfs</a>
     </div>
 </div>
 
+{# ─── PENDING REVIEW DECISION PANEL ─── #}
+{% if turf.status == 'pending' %}
+<div class="panel" style="border:2px solid var(--warning);background:rgba(245,158,11,0.04);">
+    <div class="panel-title" style="color:var(--warning);">⚠️ Awaiting Admin Review — Submitted {{
+        turf.created_at|date:"d M Y \a\t H:i" }}</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:20px;">
+            <div style="font-size:15px;font-weight:700;color:#16a34a;margin-bottom:8px;">✅ Approve Turf</div>
+            <p style="font-size:13px;color:#166534;margin:0 0 16px;">
+                Approving will activate the turf, create default hourly slots, and notify the owner by email.
+            </p>
+            <form method="post" action="/truff-admin/turfs/{{ turf.id }}/action/">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="approve">
+                <button type="submit" class="btn btn-primary" style="background:#16a34a;width:100%;"
+                    onclick="return confirm('Approve {{ turf.name }}? This will activate the turf immediately.')">
+                    ✅ Approve &amp; Activate
+                </button>
+            </form>
+        </div>
+
+        <div style="background:#fff1f2;border:1px solid #fca5a5;border-radius:10px;padding:20px;">
+            <div style="font-size:15px;font-weight:700;color:#dc2626;margin-bottom:8px;">❌ Reject Turf</div>
+            <p style="font-size:13px;color:#991b1b;margin:0 0 12px;">
+                Rejection reason is required and will be sent to the owner. They can resubmit after fixing issues.
+            </p>
+            <form method="post" action="/truff-admin/turfs/{{ turf.id }}/action/">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="reject">
+                <textarea name="reason" placeholder="Describe why this turf is being rejected (required)…" required
+                    rows="3"
+                    style="width:100%;box-sizing:border-box;border:1px solid #fca5a5;border-radius:8px;padding:10px;font-size:13px;margin-bottom:12px;resize:vertical;"></textarea>
+                <button type="submit" class="btn btn-danger" style="width:100%;">
+                    ❌ Reject Turf
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{# ─── TURF DETAILS ─── #}
 <div class="panel">
-    <div class="panel-title">Turf Details</div>
+    <div class="panel-title">Turf Information</div>
     <div class="detail-grid">
         <div class="detail-item"><label>ID</label><span>{{ turf.id }}</span></div>
         <div class="detail-item"><label>Name</label><span>{{ turf.name }}</span></div>
@@ -20,21 +68,21 @@
             <label>Status</label>
             <span class="badge {{ turf.status|status_badge }}">{{ turf.status }}</span>
         </div>
-        <div class="detail-item"><label>Price/Hour</label><span>&#8377;{{ turf.price_per_hour }}</span></div>
+        <div class="detail-item"><label>Price / Hour</label><span>&#8377;{{ turf.price_per_hour }}</span></div>
         <div class="detail-item"><label>Max Players</label><span>{{ turf.max_players }}</span></div>
         <div class="detail-item"><label>Rating</label><span>{{ turf.rating }} ({{ turf.review_count }} reviews)</span>
         </div>
         <div class="detail-item">
             <label>Active</label>
-            <span>{% if turf.is_active %}Yes{% else %}No{% endif %}</span>
+            <span>{% if turf.is_active %}✅ Yes{% else %}❌ No{% endif %}</span>
         </div>
-        <div class="detail-item"><label>Created</label><span>{{ turf.created_at|date:"d M Y H:i" }}</span></div>
+        <div class="detail-item"><label>Submitted</label><span>{{ turf.created_at|date:"d M Y H:i" }}</span></div>
         <div class="detail-item"><label>Updated</label><span>{{ turf.updated_at|date:"d M Y H:i" }}</span></div>
         <div class="detail-item">
             <label>Approved At</label>
-            <span>{% if turf.approved_at %}{{ turf.approved_at|date:"d M Y H:i" }}{% else %}-{% endif %}</span>
+            <span>{% if turf.approved_at %}{{ turf.approved_at|date:"d M Y H:i" }}{% else %}—{% endif %}</span>
         </div>
-        <div class="detail-item"><label>Approved By</label><span>{{ turf.approved_by.username|default:"-" }}</span>
+        <div class="detail-item"><label>Approved By</label><span>{{ turf.approved_by.username|default:"—" }}</span>
         </div>
         {% if turf.description %}
         <div class="detail-item" style="grid-column:1/-1;">
@@ -57,42 +105,7 @@
     </div>
 </div>
 
-<div class="panel">
-    <div class="panel-title">Owner Information</div>
-    <div class="detail-grid">
-        <div class="detail-item">
-            <label>Username</label>
-            <span><a href="/truff-admin/owners/{{ turf.owner.id }}/">{{ turf.owner.username }}</a></span>
-        </div>
-        <div class="detail-item"><label>Name</label><span>{{ turf.owner.get_full_name|default:"-" }}</span></div>
-        <div class="detail-item"><label>Email</label><span>{{ turf.owner.email|default:"-" }}</span></div>
-        <div class="detail-item"><label>Phone</label><span>{{ turf.owner.phone_number|default:"-" }}</span></div>
-        <div class="detail-item"><label>Joined</label><span>{{ turf.owner.date_joined|date:"d M Y" }}</span></div>
-    </div>
-</div>
-
-<div class="panel">
-    <div class="panel-title">Location &amp; Map</div>
-    <div class="detail-grid">
-        <div class="detail-item" style="grid-column:1/-1;">
-            <label>Full Address</label>
-            <span>{{ turf.address|default:"-" }}{% if turf.city %}, {{ turf.city }}{% endif %}{% if turf.state %}, {{ turf.state }}{% endif %}{% if turf.postal_code %} - {{ turf.postal_code }}{% endif %}</span>
-        </div>
-        <div class="detail-item"><label>City</label><span>{{ turf.city|default:"-" }}</span></div>
-        <div class="detail-item"><label>State</label><span>{{ turf.state|default:"-" }}</span></div>
-        <div class="detail-item"><label>Postal Code</label><span>{{ turf.postal_code|default:"-" }}</span></div>
-        <div class="detail-item"><label>Latitude</label><span>{{ turf.latitude }}</span></div>
-        <div class="detail-item"><label>Longitude</label><span>{{ turf.longitude }}</span></div>
-        {% if turf.google_maps_share_link %}
-        <div class="detail-item" style="grid-column:1/-1;">
-            <label>Google Maps</label>
-            <span><a href="{{ turf.google_maps_share_link }}" target="_blank" rel="noopener"
-                    style="color:var(--primary);text-decoration:underline;">View on Google Maps</a></span>
-        </div>
-        {% endif %}
-    </div>
-</div>
-
+{# ─── SPORTS & AMENITIES ─── #}
 <div class="panel">
     <div class="panel-title">Sports &amp; Amenities</div>
     <div style="margin-bottom:16px;">
@@ -103,7 +116,8 @@
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
             {% for sport in sports %}
             <span
-                style="background:rgba(34,197,94,0.15);color:#22c55e;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500;">{{ sport.name }}</span>
+                style="background:rgba(34,197,94,0.15);color:#22c55e;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500;">{{
+                sport.name }}</span>
             {% endfor %}
         </div>
         {% else %}
@@ -117,7 +131,8 @@
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
             {% for amenity in amenities %}
             <span
-                style="background:rgba(59,130,246,0.15);color:#3b82f6;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500;">{{ amenity.name }}</span>
+                style="background:rgba(59,130,246,0.15);color:#3b82f6;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500;">{{
+                amenity.name }}</span>
             {% endfor %}
         </div>
         {% else %}
@@ -126,42 +141,185 @@
     </div>
 </div>
 
+{# ─── OWNER INFORMATION ─── #}
 <div class="panel">
-    <div class="panel-title">Photos ({{ images|length }})</div>
+    <div class="panel-title">Owner Information</div>
+    <div class="detail-grid">
+        <div class="detail-item">
+            <label>Username</label>
+            <span><a href="/truff-admin/owners/{{ turf.owner.id }}/">{{ turf.owner.username }}</a></span>
+        </div>
+        <div class="detail-item"><label>Full Name</label><span>{{ turf.owner.get_full_name|default:"—" }}</span></div>
+        <div class="detail-item"><label>Email</label><span>{{ turf.owner.email|default:"—" }}</span></div>
+        <div class="detail-item"><label>Phone</label><span>{{ turf.owner.phone_number|default:"—" }}</span></div>
+        <div class="detail-item"><label>Role</label><span>{{ turf.owner.get_role_display }}</span></div>
+        <div class="detail-item"><label>Joined</label><span>{{ turf.owner.date_joined|date:"d M Y" }}</span></div>
+        <div class="detail-item">
+            <label>Verified</label>
+            <span>{% if turf.owner.is_verified %}✅ Yes{% else %}❌ No{% endif %}</span>
+        </div>
+        <div class="detail-item">
+            <label>Account Active</label>
+            <span>{% if turf.owner.is_active %}✅ Active{% else %}🚫 Blocked{% endif %}</span>
+        </div>
+    </div>
+</div>
+
+{# ─── BANK DETAILS ─── #}
+<div class="panel">
+    <div class="panel-title">💳 Bank &amp; Payout Details</div>
+    {% if turf_owner_profile %}
+    <div class="detail-grid">
+        <div class="detail-item">
+            <label>Account Holder</label>
+            <span>{{ turf_owner_profile.account_holder_name|default:"—" }}</span>
+        </div>
+        <div class="detail-item">
+            <label>Bank Name</label>
+            <span>{{ turf_owner_profile.bank_name|default:"—" }}</span>
+        </div>
+        <div class="detail-item">
+            <label>Account Number</label>
+            {% if turf_owner_profile.bank_account %}
+            <span style="font-family:monospace;letter-spacing:2px;">
+                ••••&nbsp;••••&nbsp;{{ turf_owner_profile.bank_account|slice:"-4:" }}
+                <button onclick="toggleBankNumber(this, '{{ turf_owner_profile.bank_account }}')"
+                    style="margin-left:8px;border:none;background:none;color:var(--primary);cursor:pointer;font-size:12px;">
+                    👁 Reveal
+                </button>
+            </span>
+            {% else %}
+            <span style="color:var(--text-muted);">—</span>
+            {% endif %}
+        </div>
+        <div class="detail-item">
+            <label>IFSC Code</label>
+            <span style="font-family:monospace;font-weight:600;">{{ turf_owner_profile.ifsc_code|default:"—" }}</span>
+        </div>
+        <div class="detail-item">
+            <label>Bank Verified</label>
+            {% if turf_owner_profile.bank_verified %}
+            <span class="badge badge-success">✅ Verified</span>
+            {% else %}
+            <span class="badge badge-warning">⚠️ Not Verified</span>
+            {% endif %}
+        </div>
+        <div class="detail-item">
+            <label>GST Number</label>
+            <span>{{ turf_owner_profile.gst_number|default:"Not Provided" }}</span>
+        </div>
+        {% if turf_owner_profile.agreement_accepted_at %}
+        <div class="detail-item">
+            <label>Agreement Accepted</label>
+            <span>{{ turf_owner_profile.agreement_accepted_at|date:"d M Y H:i" }}</span>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if not turf_owner_profile.bank_verified %}
+    <div style="margin-top:16px;">
+        <form method="post" action="/truff-admin/owners/{{ turf.owner.id }}/" style="display:inline;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="verify_bank">
+            <button type="submit" class="btn btn-primary btn-sm"
+                onclick="return confirm('Mark this bank account as verified?')">Verify Bank Account</button>
+        </form>
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div style="padding:20px;text-align:center;color:var(--text-muted);">
+        <p style="margin:0;">⚠️ No bank details on file for this owner.</p>
+        <p style="font-size:12px;margin-top:4px;">The owner has not completed their payout profile yet. Consider
+            requesting bank details before approving.</p>
+    </div>
+    {% endif %}
+</div>
+
+{# ─── LOCATION & MAP ─── #}
+<div class="panel">
+    <div class="panel-title">📍 Location &amp; Map</div>
+    <div class="detail-grid">
+        <div class="detail-item" style="grid-column:1/-1;">
+            <label>Full Address</label>
+            <span>{{ turf.address|default:"—" }}{% if turf.city %}, {{ turf.city }}{% endif %}{% if turf.state %}, {{
+                turf.state }}{% endif %}{% if turf.postal_code %} — {{ turf.postal_code }}{% endif %}</span>
+        </div>
+        <div class="detail-item"><label>City</label><span>{{ turf.city|default:"—" }}</span></div>
+        <div class="detail-item"><label>State</label><span>{{ turf.state|default:"—" }}</span></div>
+        <div class="detail-item"><label>Postal Code</label><span>{{ turf.postal_code|default:"—" }}</span></div>
+        <div class="detail-item"><label>Latitude</label><span style="font-family:monospace;">{{ turf.latitude }}</span>
+        </div>
+        <div class="detail-item"><label>Longitude</label><span style="font-family:monospace;">{{ turf.longitude
+                }}</span></div>
+        {% if turf.google_maps_share_link %}
+        <div class="detail-item" style="grid-column:1/-1;">
+            <label>Google Maps</label>
+            <span>
+                <a href="{{ turf.google_maps_share_link }}" target="_blank" rel="noopener"
+                    class="btn btn-outline btn-sm">🗺️ Open Google Maps ↗</a>
+            </span>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if turf.latitude and turf.longitude %}
+    <div style="margin-top:16px;border-radius:10px;overflow:hidden;border:1px solid var(--border);">
+        <iframe src="https://maps.google.com/maps?q={{ turf.latitude }},{{ turf.longitude }}&z=15&output=embed"
+            width="100%" height="280" style="border:0;display:block;" allowfullscreen="" loading="lazy"
+            referrerpolicy="no-referrer-when-downgrade">
+        </iframe>
+    </div>
+    {% endif %}
+</div>
+
+{# ─── PHOTOS ─── #}
+<div class="panel">
+    <div class="panel-title" style="display:flex;align-items:center;justify-content:space-between;">
+        <span>📸 Photos ({{ turf.images.count }})</span>
+        {% if turf.images.count > 0 %}
+        <span style="font-size:13px;font-weight:400;color:var(--text-muted);">
+            {{ turf.images.filter(is_cover=True).count|default:"0" }} cover set
+        </span>
+        {% endif %}
+    </div>
+    {% with images=turf.images.all %}
     {% if images %}
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;">
         {% for img in images %}
-        <div style="position:relative;">
+        <div
+            style="position:relative;border-radius:10px;overflow:hidden;border:1px solid var(--border);background:var(--bg);">
             <img src="{{ img.image.url }}" alt="{{ img.caption|default:turf.name }}"
                 onclick="openLightbox('{{ img.image.url }}')"
-                style="width:100%;height:160px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer;">
+                style="width:100%;height:160px;object-fit:cover;cursor:pointer;display:block;transition:transform .15s;"
+                onmouseenter="this.style.transform='scale(1.03)'" onmouseleave="this.style.transform='scale(1)'">
             {% if img.is_cover %}
             <span
-                style="position:absolute;top:8px;left:8px;background:var(--primary);color:#fff;padding:2px 10px;border-radius:4px;font-size:11px;font-weight:600;">COVER</span>
+                style="position:absolute;top:8px;left:8px;background:var(--primary);color:#fff;padding:2px 10px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:.5px;">COVER</span>
             {% endif %}
-            {% if img.caption %}
-            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">{{ img.caption }}</div>
-            {% endif %}
+            <div style="padding:8px 10px;font-size:11px;color:var(--text-muted);border-top:1px solid var(--border);">
+                <div>ID #{{ img.id }}</div>
+                <div>{{ img.uploaded_at|date:"d M Y, H:i" }}</div>
+                {% if img.caption %}<div style="color:var(--text);font-style:italic;">{{ img.caption }}</div>{% endif %}
+            </div>
         </div>
         {% endfor %}
     </div>
     {% else %}
-    <div style="text-align:center;color:var(--text-muted);padding:30px 0;">No images uploaded</div>
+    <div style="text-align:center;color:var(--text-muted);padding:40px 0;">
+        <div style="font-size:36px;margin-bottom:8px;">📷</div>
+        <p style="margin:0;">No images uploaded yet.</p>
+        <p style="font-size:12px;margin-top:4px;">Owner can upload photos from the Edit Turf Details screen.</p>
+    </div>
     {% endif %}
+    {% endwith %}
 </div>
 
+{# ─── ADMIN ACTIONS (non-pending turfs) ─── #}
+{% if turf.status != 'pending' %}
 <div class="panel">
     <div class="panel-title">Admin Actions</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
-        {% if turf.status == 'pending' %}
-        <form method="post" action="/truff-admin/turfs/{{ turf.id }}/action/" style="display:inline;">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="approve">
-            <button type="submit" class="btn btn-primary"
-                onclick="return confirm('Approve this turf?')">Approve</button>
-        </form>
-        <button class="btn btn-danger" onclick="showModal('reject')">Reject</button>
-        {% endif %}
         {% if turf.status == 'approved' %}
         <button class="btn btn-warning" onclick="showModal('suspend')">Suspend</button>
         {% endif %}
@@ -175,7 +333,9 @@
         {% endif %}
     </div>
 </div>
+{% endif %}
 
+{# ─── RECENT BOOKINGS ─── #}
 <div class="panel">
     <div class="panel-title">Recent Bookings</div>
     <table class="data-table">
@@ -195,19 +355,20 @@
                 <td><a href="/truff-admin/bookings/{{ b.id }}/">{{ b.id }}</a></td>
                 <td>{{ b.user.username }}</td>
                 <td>{{ b.booking_date }}</td>
-                <td>{{ b.start_time|time:"H:i" }} - {{ b.end_time|time:"H:i" }}</td>
+                <td>{{ b.start_time|time:"H:i" }} – {{ b.end_time|time:"H:i" }}</td>
                 <td><span class="badge {{ b.booking_status|status_badge }}">{{ b.booking_status }}</span></td>
                 <td>&#8377;{{ b.final_price }}</td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="6" style="text-align:center;color:var(--text-muted);">No bookings</td>
+                <td colspan="6" style="text-align:center;color:var(--text-muted);">No bookings yet</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
 </div>
 
+{# ─── AUDIT TRAIL ─── #}
 <div class="panel">
     <div class="panel-title">Audit Trail</div>
     <table class="data-table">
@@ -236,12 +397,14 @@
     </table>
 </div>
 
+{# ─── LIGHTBOX ─── #}
 <div id="lightbox" onclick="closeLightbox()"
-    style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:9999;justify-content:center;align-items:center;cursor:pointer;">
-    <img id="lightboxImg" style="max-width:90%;max-height:90%;border-radius:8px;">
-    <span style="position:absolute;top:20px;right:30px;color:#fff;font-size:32px;cursor:pointer;">&times;</span>
+    style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.88);z-index:9999;justify-content:center;align-items:center;cursor:pointer;">
+    <img id="lightboxImg" style="max-width:92%;max-height:92%;border-radius:8px;box-shadow:0 0 40px rgba(0,0,0,.6);">
+    <span style="position:absolute;top:20px;right:30px;color:#fff;font-size:36px;cursor:pointer;">&times;</span>
 </div>
 
+{# ─── REJECT / SUSPEND MODAL ─── #}
 <div class="modal-overlay" id="actionModal">
     <div class="modal-box">
         <h3 id="modalTitle">Provide Reason</h3>
@@ -265,6 +428,77 @@
     </div>
 </div>
 
+{# ─── EDIT HISTORY ─── #}
+<div class="panel" style="margin-top:24px;">
+    <div class="panel-title" style="display:flex;align-items:center;gap:8px;">
+        📝 Edit History
+        <span style="font-size:13px;font-weight:400;color:var(--text-muted);margin-left:4px;">
+            (owner-made changes — no approval required)
+        </span>
+    </div>
+    {% with history=turf.edit_history.all %}
+    {% if history %}
+    <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead>
+                <tr style="background:var(--bg);border-bottom:2px solid var(--border);">
+                    <th style="padding:10px 12px;text-align:left;color:var(--text-muted);font-weight:600;">Date & Time
+                    </th>
+                    <th style="padding:10px 12px;text-align:left;color:var(--text-muted);font-weight:600;">Field</th>
+                    <th style="padding:10px 12px;text-align:left;color:var(--text-muted);font-weight:600;">Old Value
+                    </th>
+                    <th style="padding:10px 12px;text-align:left;color:var(--text-muted);font-weight:600;">New Value
+                    </th>
+                    <th style="padding:10px 12px;text-align:left;color:var(--text-muted);font-weight:600;">IP Address
+                    </th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for edit in history %}
+                {% for field, vals in edit.changes.items %}
+                <tr
+                    style="border-bottom:1px solid var(--border);{% if forloop.parentloop.first and forloop.first %}background:rgba(16,185,129,0.04);{% endif %}">
+                    {% if forloop.first %}
+                    <td style="padding:10px 12px;vertical-align:top;white-space:nowrap;color:var(--text-muted);"
+                        rowspan="{{ edit.changes|length }}">
+                        {{ edit.edited_at|date:"d M Y" }}<br>
+                        <span style="font-size:11px;">{{ edit.edited_at|date:"H:i" }}</span>
+                    </td>
+                    {% endif %}
+                    <td style="padding:10px 12px;vertical-align:top;">
+                        <span style="font-weight:600;text-transform:capitalize;">{{ field|cut:"_" }}</span>
+                    </td>
+                    <td
+                        style="padding:10px 12px;vertical-align:top;color:#dc2626;max-width:200px;word-break:break-word;">
+                        {% if vals.old %}{{ vals.old }}{% else %}<span
+                            style="color:var(--text-muted);font-style:italic;">—</span>{% endif %}
+                    </td>
+                    <td
+                        style="padding:10px 12px;vertical-align:top;color:#16a34a;max-width:200px;word-break:break-word;">
+                        {{ vals.new }}
+                    </td>
+                    {% if forloop.first %}
+                    <td style="padding:10px 12px;vertical-align:top;font-family:monospace;font-size:12px;color:var(--text-muted);"
+                        rowspan="{{ edit.changes|length }}">
+                        {{ edit.ip_address|default:"—" }}
+                    </td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div style="text-align:center;padding:32px;color:var(--text-muted);">
+        <div style="font-size:32px;margin-bottom:8px;">✅</div>
+        <div style="font-weight:600;">No edits yet</div>
+        <div style="font-size:13px;margin-top:4px;">Owner has not made any changes since approval.</div>
+    </div>
+    {% endif %}
+    {% endwith %}
+</div>
+
 <script>
     function showModal(action) {
         document.getElementById('modalAction').value = action;
@@ -274,12 +508,26 @@
         if (opt) opt.style.display = action === 'suspend' ? 'block' : 'none';
     }
     function hideModal() { document.getElementById('actionModal').classList.remove('active'); }
+
     function openLightbox(url) {
-        var lb = document.getElementById('lightbox');
         document.getElementById('lightboxImg').src = url;
-        lb.style.display = 'flex';
+        document.getElementById('lightbox').style.display = 'flex';
     }
     function closeLightbox() { document.getElementById('lightbox').style.display = 'none'; }
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeLightbox(); });
+
+    function toggleBankNumber(btn, full) {
+        var span = btn.parentElement;
+        if (btn.textContent.includes('Reveal')) {
+            span.innerHTML = '<span style="font-family:monospace;letter-spacing:2px;">' + full + '</span>'
+                + ' <button onclick="toggleBankNumber(this, \'' + full + '\')"'
+                + ' style="margin-left:8px;border:none;background:none;color:var(--primary);cursor:pointer;font-size:12px;">🙈 Hide</button>';
+        } else {
+            var last4 = full.slice(-4);
+            span.innerHTML = '<span style="font-family:monospace;letter-spacing:2px;">••••&nbsp;••••&nbsp;' + last4 + '</span>'
+                + ' <button onclick="toggleBankNumber(this, \'' + full + '\')"'
+                + ' style="margin-left:8px;border:none;background:none;color:var(--primary);cursor:pointer;font-size:12px;">👁 Reveal</button>';
+        }
+    }
 </script>
 {% endblock %}

@@ -9,6 +9,17 @@ from datetime import timedelta
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# ── Firebase Admin SDK ──────────────────────────────────────────────────────
+FIREBASE_SERVICE_ACCOUNT_PATH = BASE_DIR / 'firebase-service-account.json'
+if not FIREBASE_SERVICE_ACCOUNT_PATH.exists():
+    import warnings
+    warnings.warn(
+        f'Firebase service account not found at {FIREBASE_SERVICE_ACCOUNT_PATH}. '
+        'Push notifications will not work.',
+        stacklevel=2,
+    )
+# ───────────────────────────────────────────────────────────────────────────
+
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-turfzone-dev-key-change-in-production'
 

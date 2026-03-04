@@ -1,0 +1,128 @@
+{% extends "truff_admin/base.html" %}
+{% block title %}Last Minute Deals — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:center;">
+    <div>
+        <h1>🔥 Last Minute Deals</h1>
+        <p class="subtitle">Auto-discount slots that are about to go empty.</p>
+    </div>
+    <a href="/truff-admin/offers/" class="btn btn-outline">← All Offers</a>
+</div>
+
+{% if request.GET.saved %}
+<div class="alert alert-success" style="margin-bottom:16px;">✅ Changes saved successfully.</div>
+{% endif %}
+
+<div style="display:grid;grid-template-columns:1.2fr 1fr;gap:24px;">
+
+    <!-- Config -->
+    <div class="card">
+        <div class="card-header">
+            <h2 style="margin:0;">Discount Windows</h2>
+        </div>
+        <form method="post" style="padding:20px;" id="lm-form">
+            {% csrf_token %}
+            <input type="hidden" name="sub_action" value="save">
+            <input type="hidden" name="windows_json" id="windows-json">
+
+            <label style="display:flex;align-items:center;gap:10px;margin-bottom:20px;cursor:pointer;">
+                <input type="checkbox" name="is_active" {% if cfg.is_active %}checked{% endif %}
+                    style="width:20px;height:20px;accent-color:#1DB954;">
+                <span style="font-weight:600;font-size:15px;">Enable Last Minute Deals</span>
+            </label>
+
+            <table class="data-table" id="windows-table">
+                <thead>
+                    <tr>
+                        <th>From (hrs before)</th>
+                        <th>To (hrs before)</th>
+                        <th>Discount %</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="windows-body">
+                    {% for w in windows %}
+                    <tr data-from="{{ w.0 }}" data-to="{{ w.1 }}" data-disc="{{ w.2 }}">
+                        <td><input type="number" class="form-control w-from" value="{{ w.0 }}" min="0"
+                                style="width:80px;"></td>
+                        <td><input type="number" class="form-control w-to" value="{{ w.1 }}" min="0"
+                                style="width:80px;"></td>
+                        <td><input type="number" class="form-control w-disc" value="{{ w.2 }}" min="0" max="100"
+                                style="width:80px;">%</td>
+                        <td><button type="button" class="btn btn-sm btn-danger"
+                                onclick="this.closest('tr').remove()">🗑</button></td>
+                    </tr>
+                    {% empty %}
+                    <tr id="empty-row">
+                        <td colspan="4" style="text-align:center;color:#888;">No windows. Add one below.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            <div style="margin-top:12px;display:flex;gap:8px;">
+                <button type="button" class="btn btn-outline" onclick="addRow()">➕ Add Window</button>
+                <button type="submit" class="btn btn-primary" onclick="collectWindows()">💾 Save Changes</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Stats -->
+    <div class="card">
+        <div class="card-header">
+            <h2 style="margin:0;">Stats</h2>
+        </div>
+        <div style="padding:20px;">
+            <div class="stats-grid" style="grid-template-columns:1fr 1fr;gap:12px;">
+                <div class="stat-card">
+                    <div class="stat-label">Used Today</div>
+                    <div class="stat-value">{{ uses_today }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Deals Used</div>
+                    <div class="stat-value">{{ uses_total }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Revenue Recovered</div>
+                    <div class="stat-value" style="color:#1DB954;">₹{{ total_cost|floatformat:0 }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Avg Discount</div>
+                    <div class="stat-value">{{ avg_discount }}%</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    function addRow() {
+        const empty = document.getElementById('empty-row');
+        if (empty) empty.remove();
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+        <td><input type="number" class="form-control w-from" value="6" min="0" style="width:80px;"></td>
+        <td><input type="number" class="form-control w-to" value="24" min="0" style="width:80px;"></td>
+        <td><input type="number" class="form-control w-disc" value="10" min="0" max="100" style="width:80px;">%</td>
+        <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">🗑</button></td>
+    `;
+        document.getElementById('windows-body').appendChild(tr);
+    }
+
+    function collectWindows() {
+        const rows = document.querySelectorAll('#windows-body tr[data-from], #windows-body tr:not(#empty-row)');
+        const windows = [];
+        document.querySelectorAll('#windows-body tr').forEach(tr => {
+            const from = tr.querySelector('.w-from');
+            const to = tr.querySelector('.w-to');
+            const disc = tr.querySelector('.w-disc');
+            if (from && to && disc) {
+                windows.push([parseInt(from.value), parseInt(to.value), parseInt(disc.value)]);
+            }
+        });
+        document.getElementById('windows-json').value = JSON.stringify(windows);
+    }
+</script>
+{% endblock %}

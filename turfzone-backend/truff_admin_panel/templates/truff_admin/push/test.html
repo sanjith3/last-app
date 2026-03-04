@@ -1,0 +1,63 @@
+{% extends "truff_admin/base.html" %}
+
+{% block content %}
+<h2 class="mb-4">🧪 Test Push Notification</h2>
+
+<div class="row">
+    <div class="col-lg-6">
+        <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white fw-bold">Send Test to Device</div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Device FCM Token</label>
+                        <textarea name="device_token" class="form-control" rows="4"
+                            placeholder="Paste FCM token from your device…" required></textarea>
+                        <small class="text-muted">
+                            Get the token from the app: Profile → Notification Test, or from the Flutter logs.
+                        </small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Title</label>
+                        <input type="text" name="title" class="form-control" value="Test from Truff-Admin 👋" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Message</label>
+                        <textarea name="body" class="form-control" rows="2"
+                            required>This is a test notification. If you see this, FCM is working!</textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-success w-100">
+                        <i class="fas fa-paper-plane me-1"></i> Send Test
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card border-success shadow-sm">
+            <div class="card-header bg-success text-white fw-bold">📋 How to Test</div>
+            <div class="card-body">
+                <ol class="mb-0">
+                    <li>Run the Flutter app on a real device (emulators may not support FCM).</li>
+                    <li>Check the Flutter console for: <code>📲 FCM Token: ...</code></li>
+                    <li>Copy the token and paste it above.</li>
+                    <li>Click <strong>Send Test</strong>.</li>
+                    <li>The notification should appear on the device within a few seconds.</li>
+                </ol>
+                <hr>
+                <p class="mb-0 text-muted small">
+                    If the app is <strong>open</strong>: an in-app banner will show.<br>
+                    If the app is <strong>in background</strong>: system tray notification.<br>
+                    If the app is <strong>closed</strong>: notification wakes the device.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

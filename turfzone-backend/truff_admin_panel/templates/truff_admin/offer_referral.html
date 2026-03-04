@@ -1,0 +1,97 @@
+{% extends "truff_admin/base.html" %}
+{% block title %}Referral Program — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:center;">
+    <div>
+        <h1>📢 Referral Program</h1>
+        <p class="subtitle">Viral acquisition via user referrals.</p>
+    </div>
+    <a href="/truff-admin/offers/" class="btn btn-outline">← All Offers</a>
+</div>
+
+{% if request.GET.saved %}
+<div class="alert alert-success" style="margin-bottom:16px;">✅ Changes saved successfully.</div>
+{% endif %}
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+
+    <!-- Config Form -->
+    <div class="card">
+        <div class="card-header">
+            <h2 style="margin:0;">Configuration</h2>
+        </div>
+        <form method="post" style="padding:20px;">
+            {% csrf_token %}
+            <label style="display:flex;align-items:center;gap:10px;margin-bottom:20px;cursor:pointer;">
+                <input type="checkbox" name="is_active" {% if cfg.is_active %}checked{% endif %}
+                    style="width:20px;height:20px;accent-color:#1DB954;">
+                <span style="font-weight:600;font-size:15px;">Enable Referral Program</span>
+            </label>
+
+            <h3 style="margin:0 0 12px;font-size:14px;color:#888;text-transform:uppercase;letter-spacing:.5px;">Reward
+                Structure</h3>
+
+            <div class="form-group" style="margin-bottom:14px;">
+                <label style="font-weight:600;margin-bottom:4px;display:block;">Referrer gets on install (₹)</label>
+                <input type="number" name="reward_install" value="{{ rewards.install|default:10 }}" min="0"
+                    class="form-control">
+            </div>
+            <div class="form-group" style="margin-bottom:14px;">
+                <label style="font-weight:600;margin-bottom:4px;display:block;">Referrer gets on friend's first booking
+                    (₹)</label>
+                <input type="number" name="reward_booking" value="{{ rewards.booking|default:40 }}" min="0"
+                    class="form-control">
+            </div>
+            <div class="form-group" style="margin-bottom:24px;">
+                <label style="font-weight:600;margin-bottom:4px;display:block;">Friend gets on first booking (₹)</label>
+                <input type="number" name="reward_friend" value="{{ rewards.friend|default:50 }}" min="0"
+                    class="form-control">
+            </div>
+
+            <div
+                style="background:#f0fdf4;border-radius:8px;padding:12px;margin-bottom:20px;font-size:13px;color:#166534;">
+                📌 Referral link format: <code>https://turfzone.app/join?ref={"{code}"}</code>
+            </div>
+
+            <button type="submit" class="btn btn-primary" style="width:100%;">💾 Save Changes</button>
+        </form>
+    </div>
+
+    <!-- Stats -->
+    <div class="card">
+        <div class="card-header">
+            <h2 style="margin:0;">Program Stats</h2>
+        </div>
+        <div style="padding:20px;">
+            <div class="stats-grid" style="grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+                <div class="stat-card">
+                    <div class="stat-label">Total Referrals</div>
+                    <div class="stat-value">{{ total_referrals }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Qualified (Booked)</div>
+                    <div class="stat-value">{{ qualified }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Conversion Rate</div>
+                    <div class="stat-value">{{ conversion_rate }}%</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Cost</div>
+                    <div class="stat-value">₹{{ total_cost|floatformat:0 }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Est. Revenue</div>
+                    <div class="stat-value" style="color:#1DB954;">₹{{ total_revenue|floatformat:0 }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">ROI</div>
+                    <div class="stat-value" style="color:#1DB954;">{{ roi }}x</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

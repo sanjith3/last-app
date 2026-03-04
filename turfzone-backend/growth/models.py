@@ -153,3 +153,173 @@ class TeamBooking(models.Model):
     def __str__(self):
         member_name = self.member.username if self.member else 'pending'
         return f"Team: {self.captain} → {member_name} ({self.status})"
+
+
+# ---------------------------------------------------------------------------
+# Offer Config — central admin-editable config for all offer types
+# ---------------------------------------------------------------------------
+
+class OfferConfig(models.Model):
+    """Central configuration for all offers — editable via Truff-Admin."""
+
+    OFFER_TYPE_CHOICES = [
+        ('first_booking', 'First Booking Discount'),
+        ('referral', 'Referral Program'),
+        ('last_minute', 'Last Minute Deals'),
+        ('streak', 'Streak Rewards'),
+        ('loyalty', 'Loyalty Tiers'),
+        ('captain', 'Captain Rewards'),
+        ('wallet', 'Wallet Cashback'),
+    ]
+
+    name = models.CharField(max_length=100)
+    offer_type = models.CharField(
+        max_length=50, choices=OFFER_TYPE_CHOICES, unique=True, db_index=True
+    )
+    is_active = models.BooleanField(default=True)
+
+    # Common fields
+    discount_amount = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True
+    )
+    discount_percent = models.IntegerField(null=True, blank=True)
+    min_order_value = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True
+    )
+
+    # Time-based
+    valid_from = models.DateTimeField(null=True, blank=True)
+    valid_until = models.DateTimeField(null=True, blank=True)
+    expiry_days = models.IntegerField(default=30)  # Wallet / first booking expiry
+
+    # Streak — [threshold_weeks, ...] and [reward_amount, ...] (0 = free booking)
+    streak_thresholds = models.JSONField(default=list, blank=True)
+    streak_rewards = models.JSONField(default=list, blank=True)
+
+    # Loyalty — [min_bookings, ...] and [perk_text, ...]
+    loyalty_tiers = models.JSONField(default=list, blank=True)
+    loyalty_perks = models.JSONField(default=list, blank=True)
+
+    # Referral / Captain — {"install":10, "booking":40, "friend":50} or {"captain":10, "teammate":20}
+    referral_rewards = models.JSONField(default=dict, blank=True)
+
+    # Last-minute windows — [[from_hrs, to_hrs, discount_pct], ...]
+    last_minute_windows = models.JSONField(default=list, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='offer_configs_updated',
+    )
+
+    class Meta:
+        verbose_name = 'Offer Config'
+        verbose_name_plural = 'Offer Configs'
+        ordering = ['offer_type']
+
+    def __str__(self):
+        status = 'ON' if self.is_active else 'OFF'
+        return f"{self.name} [{self.offer_type}] ({status})"
+
+    @classmethod
+    def get_active(cls, offer_type):
+        """Return the active config for a given offer type, or None."""
+        try:
+            obj = cls.objects.get(offer_type=offer_type)
+            return obj if obj.is_active else None
+        except cls.DoesNotExist:
+            return None
+
+    @classmethod
+    def get_or_create_default(cls, offer_type, name):
+        """Get or create a config with sensible defaults."""
+        defaults = {
+            'first_booking': {
+                'name': 'First Booking Discount',
+                'is_active': True,
+                'discount_amount': 100,
+                'expiry_days': 7,
+            },
+            'referral': {
+                'name': 'Referral Program',
+                'is_active': True,
+                'referral_rewards': {'install': 10, 'booking': 40, 'friend': 50},
+            },
+            'last_minute': {
+                'name': 'Last Minute Deals',
+                'is_active': True,
+                'last_minute_windows': [[6, 24, 10], [3, 6, 25], [0, 3, 50]],
+            },
+            'streak': {
+                'name': 'Streak Rewards',
+                'is_active': True,
+                'streak_thresholds': [2, 4, 8, 12],
+                'streak_rewards': [25, 75, 0, 200],
+            },
+            'loyalty': {
+                'name': 'Loyalty Tiers',
+                'is_active': True,
+                'loyalty_tiers': [5, 15, 30, 50],
+                'loyalty_perks': ['5% cashback', '10% cashback', '15% cashback', 'Free every 10th'],
+            },
+            'captain': {
+                'name': 'Captain Rewards',
+                'is_active': True,
+                'referral_rewards': {'captain': 10, 'teammate': 20},
+            },
+            'wallet': {
+                'name': 'Wallet Cashback',
+                'is_active': True,
+                'discount_percent': 5,
+                'expiry_days': 30,
+                'min_order_value': 50,
+            },
+        }
+        d = defaults.get(offer_type, {'name': name})
+        obj, created = cls.objects.get_or_create(offer_type=offer_type, defaults=d)
+        return obj
+
+
+# ---------------------------------------------------------------------------
+# Offer Usage — immutable usage log for analytics
+# ---------------------------------------------------------------------------
+
+class OfferUsage(models.Model):
+    """Append-only log of each offer reward / redemption."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='offer_usages',
+    )
+    offer_type = models.CharField(max_length=50, db_index=True)
+    offer_config = models.ForeignKey(
+        OfferConfig,
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='usages',
+    )
+    booking = models.ForeignKey(
+        'bookings.Booking',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='offer_usages',
+    )
+    reward_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['offer_type', 'created_at']),
+            models.Index(fields=['user', 'offer_type']),
+        ]
+        verbose_name = 'Offer Usage'
+        verbose_name_plural = 'Offer Usages'
+
+    def __str__(self):
+        return f"{self.offer_type} — {self.user} — ₹{self.reward_amount} [{self.created_at:%Y-%m-%d}]"

@@ -1,0 +1,97 @@
+{% extends "truff_admin/base.html" %}
+{% block title %}Captain Rewards — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:center;">
+    <div>
+        <h1>👑 Captain Rewards</h1>
+        <p class="subtitle">Captains invite teammates, everyone earns cashback.</p>
+    </div>
+    <a href="/truff-admin/offers/" class="btn btn-outline">← All Offers</a>
+</div>
+
+{% if request.GET.saved %}
+<div class="alert alert-success" style="margin-bottom:16px;">✅ Changes saved successfully.</div>
+{% endif %}
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+
+    <!-- Config -->
+    <div class="card">
+        <div class="card-header">
+            <h2 style="margin:0;">Reward Configuration</h2>
+        </div>
+        <form method="post" style="padding:20px;">
+            {% csrf_token %}
+            <label style="display:flex;align-items:center;gap:10px;margin-bottom:20px;cursor:pointer;">
+                <input type="checkbox" name="is_active" {% if cfg.is_active %}checked{% endif %}
+                    style="width:20px;height:20px;accent-color:#1DB954;">
+                <span style="font-weight:600;font-size:15px;">Enable Captain Rewards</span>
+            </label>
+
+            <div style="background:#f8f9fa;border-radius:12px;padding:20px;margin-bottom:20px;">
+                <h3 style="margin:0 0 16px;font-size:14px;color:#666;">How it works</h3>
+                <div style="display:flex;gap:12px;align-items:center;font-size:13px;">
+                    <div style="text-align:center;flex:1;padding:12px;background:white;border-radius:8px;">
+                        👑 <strong>Captain books</strong><br>
+                        <span style="color:#666;">Shares invite link</span>
+                    </div>
+                    <div style="font-size:20px;">→</div>
+                    <div style="text-align:center;flex:1;padding:12px;background:white;border-radius:8px;">
+                        👥 <strong>Teammates join</strong><br>
+                        <span style="color:#666;">Via invite link</span>
+                    </div>
+                    <div style="font-size:20px;">→</div>
+                    <div style="text-align:center;flex:1;padding:12px;background:#f0fdf4;border-radius:8px;">
+                        💰 <strong>Both earn</strong><br>
+                        <span style="color:#1DB954;">Wallet cashback</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom:16px;">
+                <label style="font-weight:600;margin-bottom:4px;display:block;">Captain earns per teammate (₹)</label>
+                <input type="number" name="captain_reward" value="{{ rewards.captain|default:10 }}" min="0"
+                    class="form-control">
+            </div>
+
+            <div class="form-group" style="margin-bottom:24px;">
+                <label style="font-weight:600;margin-bottom:4px;display:block;">Teammate earns on first booking
+                    (₹)</label>
+                <input type="number" name="teammate_reward" value="{{ rewards.teammate|default:20 }}" min="0"
+                    class="form-control">
+            </div>
+
+            <button type="submit" class="btn btn-primary" style="width:100%;">💾 Save Changes</button>
+        </form>
+    </div>
+
+    <!-- Stats -->
+    <div class="card">
+        <div class="card-header">
+            <h2 style="margin:0;">Team Booking Stats</h2>
+        </div>
+        <div style="padding:20px;">
+            <div class="stats-grid" style="grid-template-columns:1fr 1fr;gap:12px;">
+                <div class="stat-card">
+                    <div class="stat-label">Total Team Bookings</div>
+                    <div class="stat-value">{{ total_team_bookings }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Avg Team Size</div>
+                    <div class="stat-value">{{ avg_team_size }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">New Users via Teams</div>
+                    <div class="stat-value" style="color:#1DB954;">{{ new_users_via_teams }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Cost per New User</div>
+                    <div class="stat-value">₹{{ cost_per_new_user }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

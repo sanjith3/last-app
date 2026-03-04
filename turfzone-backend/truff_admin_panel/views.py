@@ -317,6 +317,9 @@ class TurfDetailView(TruffAdminRequiredMixin, View):
             booking_status=BookingStatus.CONFIRMED,
         ).count()
 
+        # TurfOwner profile (bank details, GST, agreement) — may not exist for older owners
+        turf_owner_profile = getattr(turf.owner, 'turf_owner_profile', None)
+
         return render(request, 'truff_admin/turf_detail.html', {
             'turf': turf,
             'images': images,
@@ -325,6 +328,7 @@ class TurfDetailView(TruffAdminRequiredMixin, View):
             'audit_logs': audit,
             'recent_bookings': bookings,
             'future_bookings_count': future_bookings_count,
+            'turf_owner_profile': turf_owner_profile,
         })
 
 
@@ -1984,3 +1988,422 @@ class SupportUnreadCountView(TruffAdminRequiredMixin, View):
             for t in SupportTicket.objects.filter(status__in=['open', 'awaiting_reply'])
         )
         return JsonResponse({'unread': count})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# OFFER MANAGEMENT
+# ═══════════════════════════════════════════════════════════════════════════
+
+from growth.models import OfferConfig, OfferUsage
+
+
+def _get_offer_config(offer_type):
+    """Helper — get or auto-create an OfferConfig for the given type."""
+    names = {
+        'first_booking': 'First Booking Discount',
+        'referral': 'Referral Program',
+        'last_minute': 'Last Minute Deals',
+        'streak': 'Streak Rewards',
+        'loyalty': 'Loyalty Tiers',
+        'captain': 'Captain Rewards',
+        'wallet': 'Wallet Cashback',
+    }
+    return OfferConfig.get_or_create_default(offer_type, names.get(offer_type, offer_type))
+
+
+def _offer_usage_stats(offer_type):
+    """Return (count_today, count_total, cost_total) for an offer type."""
+    from django.utils import timezone as tz
+    today = tz.localdate()
+    qs = OfferUsage.objects.filter(offer_type=offer_type)
+    today_count = qs.filter(created_at__date=today).count()
+    total_count = qs.count()
+    total_cost = qs.aggregate(c=Sum('reward_amount'))['c'] or Decimal('0')
+    return today_count, total_count, total_cost
+
+
+class OffersOverviewView(TruffAdminRequiredMixin, View):
+    """Offer management dashboard — stats + ROI table for all offer types."""
+
+    def get(self, request):
+        OFFER_TYPES = [
+            ('first_booking', 'First Booking',   'first-booking', 5.0),
+            ('referral',      'Referral',         'referral',      5.0),
+            ('last_minute',   'Last Minute',      'last-minute',   6.0),
+            ('streak',        'Streak Rewards',   'streaks',       8.0),
+            ('loyalty',       'Loyalty Tiers',    'loyalty',       8.0),
+            ('captain',       'Captain',          'captain',       8.0),
+            ('wallet',        'Wallet Cashback',  'wallet',        4.0),
+        ]
+
+        rows = []
+        total_cost = Decimal('0')
+        total_revenue = Decimal('0')
+        total_uses_today = 0
+        active_count = 0
+
+        for ot, label, url_slug, roi_multiplier in OFFER_TYPES:
+            cfg = _get_offer_config(ot)
+            today_c, all_c, cost = _offer_usage_stats(ot)
+            revenue = (cost * Decimal(str(roi_multiplier))).quantize(Decimal('0.01'))
+            total_cost += cost
+            total_revenue += revenue
+            total_uses_today += today_c
+            if cfg.is_active:
+                active_count += 1
+            rows.append({
+                'offer_type': ot,
+                'url_slug': url_slug,
+                'label': label,
+                'is_active': cfg.is_active,
+                'uses_today': today_c,
+                'uses_total': all_c,
+                'cost': cost,
+                'revenue': revenue,
+                'roi': roi_multiplier,
+            })
+
+        overall_roi = round(float(total_revenue) / float(total_cost), 1) if total_cost else 0
+
+        return render(request, 'truff_admin/offers_overview.html', {
+            'rows': rows,
+            'active_count': active_count,
+            'total_uses_today': total_uses_today,
+            'total_cost': total_cost,
+            'total_revenue': total_revenue,
+            'overall_roi': overall_roi,
+        })
+
+
+class FirstBookingOfferView(TruffAdminRequiredMixin, View):
+    """First Booking Discount — config form + usage stats."""
+
+    def _ctx(self, cfg):
+        today_c, all_c, cost = _offer_usage_stats('first_booking')
+        revenue = (cost * Decimal('5')).quantize(Decimal('0.01'))
+        return {
+            'cfg': cfg,
+            'uses_today': today_c,
+            'uses_total': all_c,
+            'total_cost': cost,
+            'total_revenue': revenue,
+            'roi': '5.0',
+        }
+
+    def get(self, request):
+        cfg = _get_offer_config('first_booking')
+        return render(request, 'truff_admin/offer_first_booking.html', self._ctx(cfg))
+
+    def post(self, request):
+        cfg = _get_offer_config('first_booking')
+        cfg.is_active = request.POST.get('is_active') == 'on'
+        discount_type = request.POST.get('discount_type', 'fixed')
+        if discount_type == 'fixed':
+            cfg.discount_amount = Decimal(request.POST.get('discount_amount') or '0')
+            cfg.discount_percent = None
+        else:
+            cfg.discount_percent = int(request.POST.get('discount_percent') or '0')
+            cfg.discount_amount = None
+        cfg.min_order_value = Decimal(request.POST.get('min_order_value') or '0') or None
+        cfg.expiry_days = int(request.POST.get('expiry_days') or '7')
+        cfg.updated_by = request.user
+        cfg.save()
+        from .utils import log_admin_action
+        log_admin_action(request, 'offer_updated', 'OfferConfig', cfg.pk, {'offer_type': 'first_booking'})
+        return redirect('/truff-admin/offers/first-booking/?saved=1')
+
+
+class ReferralProgramView(TruffAdminRequiredMixin, View):
+    """Referral Program — config + stats."""
+
+    def _ctx(self, cfg):
+        today_c, all_c, cost = _offer_usage_stats('referral')
+        qualified = User.objects.filter(qualified_referrals__gt=0).count()
+        total_referrals = User.objects.aggregate(t=Sum('total_referrals'))['t'] or 0
+        conv = round((qualified / total_referrals) * 100) if total_referrals else 0
+        revenue = (cost * Decimal('5')).quantize(Decimal('0.01'))
+        rewards = cfg.referral_rewards or {'install': 10, 'booking': 40, 'friend': 50}
+        return {
+            'cfg': cfg,
+            'rewards': rewards,
+            'uses_today': today_c,
+            'uses_total': all_c,
+            'total_cost': cost,
+            'total_revenue': revenue,
+            'roi': '5.0',
+            'total_referrals': total_referrals,
+            'qualified': qualified,
+            'conversion_rate': conv,
+        }
+
+    def get(self, request):
+        cfg = _get_offer_config('referral')
+        return render(request, 'truff_admin/offer_referral.html', self._ctx(cfg))
+
+    def post(self, request):
+        cfg = _get_offer_config('referral')
+        cfg.is_active = request.POST.get('is_active') == 'on'
+        cfg.referral_rewards = {
+            'install': int(request.POST.get('reward_install') or '10'),
+            'booking': int(request.POST.get('reward_booking') or '40'),
+            'friend': int(request.POST.get('reward_friend') or '50'),
+        }
+        cfg.updated_by = request.user
+        cfg.save()
+        from .utils import log_admin_action
+        log_admin_action(request, 'offer_updated', 'OfferConfig', cfg.pk, {'offer_type': 'referral'})
+        return redirect('/truff-admin/offers/referral/?saved=1')
+
+
+class LastMinuteDealsView(TruffAdminRequiredMixin, View):
+    """Last Minute Deals — time window CRUD + stats."""
+
+    def _ctx(self, cfg):
+        today_c, all_c, cost = _offer_usage_stats('last_minute')
+        windows = cfg.last_minute_windows or []
+        return {
+            'cfg': cfg,
+            'windows': windows,
+            'uses_total': all_c,
+            'uses_today': today_c,
+            'total_cost': cost,
+            'avg_discount': round(sum(w[2] for w in windows) / len(windows)) if windows else 0,
+        }
+
+    def get(self, request):
+        cfg = _get_offer_config('last_minute')
+        return render(request, 'truff_admin/offer_last_minute.html', self._ctx(cfg))
+
+    def post(self, request):
+        import json
+        cfg = _get_offer_config('last_minute')
+        sub = request.POST.get('sub_action', 'save')
+
+        if sub == 'save':
+            cfg.is_active = request.POST.get('is_active') == 'on'
+            windows_raw = request.POST.get('windows_json', '[]')
+            try:
+                cfg.last_minute_windows = json.loads(windows_raw)
+            except (json.JSONDecodeError, TypeError):
+                pass
+            cfg.updated_by = request.user
+            cfg.save()
+            from .utils import log_admin_action
+            log_admin_action(request, 'offer_updated', 'OfferConfig', cfg.pk, {'offer_type': 'last_minute'})
+
+        return redirect('/truff-admin/offers/last-minute/?saved=1')
+
+
+class StreakRewardsView(TruffAdminRequiredMixin, View):
+    """Streak Rewards — threshold/reward CRUD + active streak counts."""
+
+    def _ctx(self, cfg):
+        from growth.models import UserStreak
+        thresholds = cfg.streak_thresholds or []
+        rewards = cfg.streak_rewards or []
+        levels = []
+        for i, (t, r) in enumerate(zip(thresholds, rewards)):
+            count = UserStreak.objects.filter(current_streak__gte=t).count()
+            levels.append({'weeks': t, 'reward': r, 'count': count, 'idx': i})
+        _, all_c, cost = _offer_usage_stats('streak')
+        return {
+            'cfg': cfg,
+            'levels': levels,
+            'uses_total': all_c,
+            'total_cost': cost,
+        }
+
+    def get(self, request):
+        cfg = _get_offer_config('streak')
+        return render(request, 'truff_admin/offer_streaks.html', self._ctx(cfg))
+
+    def post(self, request):
+        import json
+        cfg = _get_offer_config('streak')
+        cfg.is_active = request.POST.get('is_active') == 'on'
+        try:
+            cfg.streak_thresholds = json.loads(request.POST.get('thresholds_json', '[]'))
+            cfg.streak_rewards = json.loads(request.POST.get('rewards_json', '[]'))
+        except (json.JSONDecodeError, TypeError):
+            pass
+        cfg.updated_by = request.user
+        cfg.save()
+        from .utils import log_admin_action
+        log_admin_action(request, 'offer_updated', 'OfferConfig', cfg.pk, {'offer_type': 'streak'})
+        return redirect('/truff-admin/offers/streaks/?saved=1')
+
+
+class LoyaltyTiersView(TruffAdminRequiredMixin, View):
+    """Loyalty Tiers — tier CRUD + user distribution."""
+
+    def _ctx(self, cfg):
+        tiers = cfg.loyalty_tiers or []
+        perks = cfg.loyalty_perks or []
+        TIER_NAMES = ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond']
+        levels = []
+        for i, (t, p) in enumerate(zip(tiers, perks)):
+            name = TIER_NAMES[i] if i < len(TIER_NAMES) else f'Tier {i+1}'
+            count = User.objects.filter(total_bookings__gte=t).count()
+            levels.append({'name': name, 'threshold': t, 'perk': p, 'count': count, 'idx': i})
+        _, all_c, cost = _offer_usage_stats('loyalty')
+        return {
+            'cfg': cfg,
+            'levels': levels,
+            'uses_total': all_c,
+            'total_cost': cost,
+        }
+
+    def get(self, request):
+        cfg = _get_offer_config('loyalty')
+        return render(request, 'truff_admin/offer_loyalty.html', self._ctx(cfg))
+
+    def post(self, request):
+        import json
+        cfg = _get_offer_config('loyalty')
+        cfg.is_active = request.POST.get('is_active') == 'on'
+        try:
+            cfg.loyalty_tiers = json.loads(request.POST.get('tiers_json', '[]'))
+            cfg.loyalty_perks = json.loads(request.POST.get('perks_json', '[]'))
+        except (json.JSONDecodeError, TypeError):
+            pass
+        cfg.updated_by = request.user
+        cfg.save()
+        from .utils import log_admin_action
+        log_admin_action(request, 'offer_updated', 'OfferConfig', cfg.pk, {'offer_type': 'loyalty'})
+        return redirect('/truff-admin/offers/loyalty/?saved=1')
+
+
+class CaptainRewardsView(TruffAdminRequiredMixin, View):
+    """Captain Rewards — config + team stats."""
+
+    def _ctx(self, cfg):
+        from growth.models import TeamBooking
+        rewards = cfg.referral_rewards or {'captain': 10, 'teammate': 20}
+        total_teams = TeamBooking.objects.filter(status='joined').count()
+        with_members = TeamBooking.objects.filter(status='joined').values('booking').distinct().count()
+        avg_team_size = round(total_teams / with_members, 1) if with_members else 0
+        new_users = TeamBooking.objects.filter(
+            status='joined', member__isnull=False
+        ).values('member').distinct().count()
+        _, _, cost = _offer_usage_stats('captain')
+        cost_per_user = (cost / new_users).quantize(Decimal('0.01')) if new_users else Decimal('0')
+        return {
+            'cfg': cfg,
+            'rewards': rewards,
+            'total_team_bookings': with_members,
+            'avg_team_size': avg_team_size,
+            'new_users_via_teams': new_users,
+            'cost_per_new_user': cost_per_user,
+        }
+
+    def get(self, request):
+        cfg = _get_offer_config('captain')
+        return render(request, 'truff_admin/offer_captain.html', self._ctx(cfg))
+
+    def post(self, request):
+        cfg = _get_offer_config('captain')
+        cfg.is_active = request.POST.get('is_active') == 'on'
+        cfg.referral_rewards = {
+            'captain': int(request.POST.get('captain_reward') or '10'),
+            'teammate': int(request.POST.get('teammate_reward') or '20'),
+        }
+        cfg.updated_by = request.user
+        cfg.save()
+        from .utils import log_admin_action
+        log_admin_action(request, 'offer_updated', 'OfferConfig', cfg.pk, {'offer_type': 'captain'})
+        return redirect('/truff-admin/offers/captain/?saved=1')
+
+
+class WalletCashbackView(TruffAdminRequiredMixin, View):
+    """Wallet Cashback — config + wallet stats."""
+
+    def _ctx(self, cfg):
+        from growth.models import WalletTransaction
+        from django.utils import timezone as tz
+        total_balance = User.objects.aggregate(b=Sum('wallet_balance'))['b'] or Decimal('0')
+        users_with_wallet = User.objects.filter(wallet_balance__gt=0).count()
+        now = tz.now()
+        expiring_7d = WalletTransaction.objects.filter(
+            type='credit', is_expired=False,
+            expires_at__isnull=False,
+            expires_at__lte=now + timedelta(days=7),
+            expires_at__gt=now,
+        ).aggregate(t=Sum('amount'))['t'] or Decimal('0')
+        month_start = (now.date()).replace(day=1)
+        redeemed = WalletTransaction.objects.filter(
+            type='debit', created_at__date__gte=month_start
+        ).aggregate(t=Sum('amount'))['t'] or Decimal('0')
+        return {
+            'cfg': cfg,
+            'total_balance': total_balance,
+            'users_with_wallet': users_with_wallet,
+            'expiring_7d': expiring_7d,
+            'redeemed_month': redeemed,
+        }
+
+    def get(self, request):
+        cfg = _get_offer_config('wallet')
+        return render(request, 'truff_admin/offer_wallet.html', self._ctx(cfg))
+
+    def post(self, request):
+        cfg = _get_offer_config('wallet')
+        cfg.is_active = request.POST.get('is_active') == 'on'
+        cfg.discount_percent = int(request.POST.get('cashback_percent') or '5')
+        cfg.expiry_days = int(request.POST.get('expiry_days') or '30')
+        cfg.min_order_value = Decimal(request.POST.get('min_payout') or '50') or None
+        cfg.updated_by = request.user
+        cfg.save()
+        from .utils import log_admin_action
+        log_admin_action(request, 'offer_updated', 'OfferConfig', cfg.pk, {'offer_type': 'wallet'})
+        return redirect('/truff-admin/offers/wallet/?saved=1')
+
+
+class OwnerQRCodesView(TruffAdminRequiredMixin, View):
+    """Owner QR Codes — table of all owners with QR stats."""
+
+    def get(self, request):
+        owners = TurfOwner.objects.select_related('user').order_by('-qr_bookings')
+        agg = owners.aggregate(
+            total_scans=Sum('qr_scans'),
+            total_installs=Sum('qr_installs'),
+            total_rev=Sum('qr_earnings'),
+        )
+        return render(request, 'truff_admin/offer_qr_codes.html', {
+            'owners': owners,
+            'total_qr_scans': agg['total_scans'] or 0,
+            'total_qr_installs': agg['total_installs'] or 0,
+            'total_qr_revenue': agg['total_rev'] or Decimal('0'),
+        })
+
+
+class ExportOfferReportView(TruffAdminRequiredMixin, View):
+    """Export OfferUsage as CSV."""
+
+    def get(self, request):
+        import csv
+        from django.http import StreamingHttpResponse
+
+        def rows():
+            yield ['offer_type', 'user', 'reward_amount', 'booking_id', 'ip_address', 'created_at']
+            for usage in OfferUsage.objects.select_related('user', 'booking').order_by('-created_at'):
+                yield [
+                    usage.offer_type,
+                    usage.user.username,
+                    str(usage.reward_amount),
+                    usage.booking_id or '',
+                    usage.ip_address or '',
+                    usage.created_at.strftime('%Y-%m-%d %H:%M'),
+                ]
+
+        def stream():
+            buf = []
+            writer = csv.writer(__import__('io').StringIO())
+            for row in rows():
+                obj = __import__('io').StringIO()
+                csv.writer(obj).writerow(row)
+                yield obj.getvalue()
+
+        response = StreamingHttpResponse(stream(), content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="offer_report.csv"'
+        return response
+

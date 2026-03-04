@@ -62,10 +62,16 @@ def create_order(request):
     """
     client = _get_razorpay_client()
     if client is None:
+        # ── No Razorpay keys — return a mock order so Flutter can use fallback confirm ──
+        # Flutter PaymentScreen already handles statusCode == 503 with _fallbackDirectConfirm.
+        # Returning 503 still triggers that path; this is fine for development.
+        # If you have test keys, set RAZORPAY_KEY_ID & RAZORPAY_KEY_SECRET in your environment.
+        logger.warning("Razorpay not configured — returning 503 so Flutter falls back to direct confirm.")
         return Response(
-            {'error': 'Payment gateway not configured. Contact support.'},
+            {'error': 'Payment gateway not configured. Using direct confirmation fallback.'},
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
+
 
     preview_token = request.data.get('preview_token')
     if not preview_token:

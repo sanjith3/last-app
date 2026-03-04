@@ -991,19 +991,30 @@ class BookingViewSet(viewsets.ModelViewSet):
 
                 financials = _compute_financial_breakdown(slots_pricing)
 
-                # 6b. Re-apply first booking discount from preview
-                first_booking_discount = preview.first_booking_discount
-                if first_booking_discount > Decimal('0'):
-                    financials['total_payable'] = _quantize(
-                        financials['total_payable'] - first_booking_discount
-                    )
+                # 6b. preview.total_payable already includes first_booking_discount.
+                #     Do NOT re-subtract it — that causes the ₹50 double-deduction 409.
 
-                # 7. Compare total — reject if mismatch
-                if abs(financials['total_payable'] - client_total) > Decimal('0.01'):
+                # 6c. Accept coupon_discount from client (≤ ₹500, validated server-side)
+                MAX_COUPON_DISCOUNT = Decimal('500.00')
+                coupon_discount = Decimal('0.00')
+                raw_coupon = request.data.get('coupon_discount', '0')
+                try:
+                    coupon_discount = min(
+                        _quantize(Decimal(str(raw_coupon))),
+                        MAX_COUPON_DISCOUNT,
+                    )
+                except Exception:
+                    coupon_discount = Decimal('0.00')
+
+                # 7. Compare total:
+                #    authoritative = preview.total_payable (post-discount) – coupon
+                #    Allow ₹1.00 tolerance to absorb float → string → Decimal drift
+                authoritative_total = _quantize(preview.total_payable - coupon_discount)
+                if abs(authoritative_total - client_total) > Decimal('1.00'):
                     return Response({
                         'success': False,
                         'error': 'Price has changed since preview. Please re-preview.',
-                        'new_total_payable': str(financials['total_payable']),
+                        'new_total_payable': str(authoritative_total),
                         'client_total': str(client_total),
                     }, status=status.HTTP_409_CONFLICT)
 
@@ -1076,7 +1087,28 @@ class BookingViewSet(viewsets.ModelViewSet):
                     'total_bookings', 'total_credits', 'first_booking_completed',
                 ])
 
+                # 14. Record coupon usage — enforces one-time use per user
+                coupon_code = request.data.get('coupon_code', '').strip().upper()
+                if coupon_code and coupon_discount > Decimal('0'):
+                    try:
+                        from users.models import PromoCode, CouponUsage
+                        promo = PromoCode.objects.get(code=coupon_code, is_active=True)
+                        CouponUsage.objects.get_or_create(
+                            user=request.user,
+                            coupon=promo,
+                            defaults={'booking_id': booking.id},
+                        )
+                        # Increment global usage counter
+                        PromoCode.objects.filter(pk=promo.pk).update(
+                            current_uses=models.F('current_uses') + 1
+                        )
+                        logger.info(f"Coupon {coupon_code} recorded for user {request.user.id}")
+                    except Exception as e:
+                        # Non-fatal — booking succeeds even if coupon tracking fails
+                        logger.warning(f"Coupon usage tracking failed for {coupon_code}: {e}")
+
                 logger.info(
+
                     f"Booking #{booking.id} confirmed: ₹{financials['total_payable']} | "
                     f"Turf: {preview.turf.name} | Date: {preview.booking_date} | "
                     f"Credits: {user_locked.total_credits}"

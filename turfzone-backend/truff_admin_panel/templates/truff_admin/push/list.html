@@ -1,0 +1,59 @@
+{% extends "truff_admin/base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0">📲 Push Notifications</h2>
+    <div>
+        <a href="{% url 'truff_admin:push_test' %}" class="btn btn-outline-info btn-sm me-2">🧪 Test</a>
+        <a href="{% url 'truff_admin:push_send' %}" class="btn btn-success btn-sm">+ Send New</a>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Title</th>
+                    <th>Type</th>
+                    <th>Target</th>
+                    <th>Status</th>
+                    <th>Sent At</th>
+                    <th>✅/❌</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for n in notifs %}
+                <tr>
+                    <td><strong>{{ n.title }}</strong><br><small class="text-muted">{{ n.body|truncatechars:60
+                            }}</small></td>
+                    <td><span class="badge bg-secondary">{{ n.get_notification_type_display }}</span></td>
+                    <td>
+                        {% if n.target_type == 'token' %}
+                        <span class="badge bg-info">Device</span>
+                        {% elif n.target_type == 'topic' %}
+                        <span class="badge bg-primary">Topic: {{ n.topic }}</span>
+                        {% else %}
+                        <span class="badge bg-dark">All Users</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if n.is_sent %}
+                        <span class="badge bg-success">Sent</span>
+                        {% else %}
+                        <span class="badge bg-warning text-dark">Pending</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ n.sent_at|date:"d M Y H:i"|default:"—" }}</td>
+                    <td>✅{{ n.success_count }} / ❌{{ n.failure_count }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="6" class="text-center text-muted py-4">No notifications sent yet.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

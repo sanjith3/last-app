@@ -1,0 +1,106 @@
+{% extends "truff_admin/base.html" %}
+{% block title %}Offer Dashboard — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>🎁 Offer Management</h1>
+    <p class="subtitle">Control every offer from one place — enable, tune, and track ROI.</p>
+</div>
+
+{% if request.GET.saved %}
+<div class="alert alert-success" style="margin-bottom:16px;">✅ Changes saved successfully.</div>
+{% endif %}
+
+<!-- KPI Cards -->
+<div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px;">
+    <div class="stat-card">
+        <div class="stat-label">Active Offers</div>
+        <div class="stat-value" style="color:#1DB954;">{{ active_count }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Used Today</div>
+        <div class="stat-value">{{ total_uses_today }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Total Reward Cost</div>
+        <div class="stat-value">₹{{ total_cost|floatformat:0 }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Overall ROI</div>
+        <div class="stat-value" style="color:#1DB954;">{{ overall_roi }}x</div>
+    </div>
+</div>
+
+<!-- Offer Sub-nav tabs -->
+<div class="offer-tabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:24px;">
+    {% for r in rows %}
+    <a href="/truff-admin/offers/{{ r.url_slug }}/"
+        class="badge {% if r.is_active %}badge-success{% else %}badge-warning{% endif %}"
+        style="padding:6px 12px;border-radius:6px;text-decoration:none;font-size:13px;">
+        {% if r.is_active %}✅{% else %}⏸{% endif %} {{ r.label }}
+    </a>
+    {% endfor %}
+    <a href="/truff-admin/offers/qr-codes/" class="badge badge-info"
+        style="padding:6px 12px;border-radius:6px;text-decoration:none;font-size:13px;">📷 QR Codes</a>
+</div>
+
+<!-- Analytics Table -->
+<div class="card">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <h2 style="margin:0;">ROI by Offer Type</h2>
+        <a href="/truff-admin/offers/export/" class="btn btn-outline" style="font-size:12px;">⬇ Export CSV</a>
+    </div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Offer</th>
+                <th>Status</th>
+                <th>Used Today</th>
+                <th>Total Uses</th>
+                <th>Total Cost</th>
+                <th>Est. Revenue</th>
+                <th>ROI</th>
+                <th>Manage</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr>
+                <td><strong>{{ r.label }}</strong></td>
+                <td>
+                    {% if r.is_active %}
+                    <span class="badge badge-success">Active</span>
+                    {% else %}
+                    <span class="badge badge-warning">Paused</span>
+                    {% endif %}
+                </td>
+                <td>{{ r.uses_today }}</td>
+                <td>{{ r.uses_total }}</td>
+                <td>₹{{ r.cost|floatformat:0 }}</td>
+                <td>₹{{ r.revenue|floatformat:0 }}</td>
+                <td><strong style="color:#1DB954;">{{ r.roi }}x</strong></td>
+                <td>
+                    <a href="/truff-admin/offers/{{ r.url_slug }}/" class="btn btn-sm btn-outline">Configure</a>
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="8" style="text-align:center;color:#888;">No offer data yet.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr style="font-weight:bold;background:#f8f9fa;">
+                <td>TOTAL</td>
+                <td>{{ active_count }} active</td>
+                <td>{{ total_uses_today }}</td>
+                <td>—</td>
+                <td>₹{{ total_cost|floatformat:0 }}</td>
+                <td>₹{{ total_revenue|floatformat:0 }}</td>
+                <td style="color:#1DB954;">{{ overall_roi }}x</td>
+                <td></td>
+            </tr>
+        </tfoot>
+    </table>
+</div>
+{% endblock %}

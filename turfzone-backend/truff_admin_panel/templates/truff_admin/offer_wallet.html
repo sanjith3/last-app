@@ -1,0 +1,92 @@
+{% extends "truff_admin/base.html" %}
+{% block title %}Wallet Cashback — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:center;">
+    <div>
+        <h1>💰 Wallet Cashback</h1>
+        <p class="subtitle">Auto-cashback on every booking — forces re-visits.</p>
+    </div>
+    <a href="/truff-admin/offers/" class="btn btn-outline">← All Offers</a>
+</div>
+
+{% if request.GET.saved %}
+<div class="alert alert-success" style="margin-bottom:16px;">✅ Changes saved successfully.</div>
+{% endif %}
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+
+    <!-- Config -->
+    <div class="card">
+        <div class="card-header">
+            <h2 style="margin:0;">Configuration</h2>
+        </div>
+        <form method="post" style="padding:20px;">
+            {% csrf_token %}
+            <label style="display:flex;align-items:center;gap:10px;margin-bottom:20px;cursor:pointer;">
+                <input type="checkbox" name="is_active" {% if cfg.is_active %}checked{% endif %}
+                    style="width:20px;height:20px;accent-color:#1DB954;">
+                <span style="font-weight:600;font-size:15px;">Enable Wallet Cashback</span>
+            </label>
+
+            <div class="form-group" style="margin-bottom:16px;">
+                <label style="font-weight:600;margin-bottom:4px;display:block;">Cashback Rate (% on each
+                    booking)</label>
+                <input type="number" name="cashback_percent" value="{{ cfg.discount_percent|default:5 }}" min="0"
+                    max="50" class="form-control">
+            </div>
+
+            <div class="form-group" style="margin-bottom:16px;">
+                <label style="font-weight:600;margin-bottom:4px;display:block;">Wallet Credit Expiry (days)</label>
+                <input type="number" name="expiry_days" value="{{ cfg.expiry_days|default:30 }}" min="1" max="365"
+                    class="form-control">
+            </div>
+
+            <div class="form-group" style="margin-bottom:24px;">
+                <label style="font-weight:600;margin-bottom:4px;display:block;">Minimum Wallet Payout (₹)</label>
+                <input type="number" name="min_payout" value="{{ cfg.min_order_value|default:50 }}" min="0"
+                    class="form-control">
+            </div>
+
+            <button type="submit" class="btn btn-primary" style="width:100%;">💾 Save Changes</button>
+        </form>
+    </div>
+
+    <!-- Stats -->
+    <div>
+        <div class="card" style="margin-bottom:16px;">
+            <div class="card-header">
+                <h2 style="margin:0;">Wallet Stats</h2>
+            </div>
+            <div style="padding:20px;">
+                <div class="stats-grid" style="grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+                    <div class="stat-card">
+                        <div class="stat-label">Total Wallet Balance</div>
+                        <div class="stat-value">₹{{ total_balance|floatformat:0 }}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Users with Wallet</div>
+                        <div class="stat-value">{{ users_with_wallet }}</div>
+                    </div>
+                    <div class="stat-card" style="border-color:#f59e0b;">
+                        <div class="stat-label" style="color:#b45309;">Expiring in 7 Days</div>
+                        <div class="stat-value" style="color:#b45309;">₹{{ expiring_7d|floatformat:0 }}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Redeemed This Month</div>
+                        <div class="stat-value" style="color:#1DB954;">₹{{ redeemed_month|floatformat:0 }}</div>
+                    </div>
+                </div>
+
+                {% if expiring_7d > 0 %}
+                <div style="background:#fef3c7;border-radius:8px;padding:12px;font-size:13px;color:#92400e;">
+                    ⚠️ ₹{{ expiring_7d|floatformat:0 }} is expiring within 7 days.
+                    <a href="#" style="color:#b45309;font-weight:600;">Send Expiry Reminders →</a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

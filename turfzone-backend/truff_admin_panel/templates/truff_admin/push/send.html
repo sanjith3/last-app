@@ -1,0 +1,142 @@
+{% extends "truff_admin/base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0">📲 Send Push Notification</h2>
+    <a href="{% url 'truff_admin:push_list' %}" class="btn btn-outline-secondary btn-sm">← History</a>
+</div>
+
+<div class="row">
+    <!-- Form -->
+    <div class="col-lg-7">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Title</label>
+                        <input type="text" name="title" class="form-control"
+                            placeholder="e.g. 🎉 Weekend Special — Book Now!" required maxlength="255">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Message</label>
+                        <textarea name="body" class="form-control" rows="3" placeholder="Notification body text…"
+                            required></textarea>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col">
+                            <label class="form-label fw-bold">Type</label>
+                            <select name="notification_type" class="form-select">
+                                {% for val, label in notification_types %}
+                                <option value="{{ val }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col">
+                            <label class="form-label fw-bold">Audience</label>
+                            <select name="target_type" class="form-select" id="targetSelect">
+                                {% for val, label in target_choices %}
+                                <option value="{{ val }}" data-count="{{ stats|default:'' }}">
+                                    {{ label }}
+                                    {% if val == 'all' %}({{ total_devices }} devices)
+                                    {% elif val == 'owners' %}({{ owner_devices }} devices)
+                                    {% elif val == 'customers' %}({{ customer_devices }} devices)
+                                    {% elif val == 'recent_bookers' %}({{ recent_devices }} devices)
+                                    {% elif val == 'inactive' %}({{ inactive_devices }} devices)
+                                    {% endif %}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Token field — only for 'token' target -->
+                    <div id="tokenSection" class="mb-3 d-none">
+                        <label class="form-label fw-bold">Device FCM Token</label>
+                        <textarea name="device_token" class="form-control" rows="3"
+                            placeholder="Paste FCM token…"></textarea>
+                        <small class="text-muted">Get this from Flutter logs: <code>📲 FCM Token: ...</code></small>
+                    </div>
+
+                    <hr>
+                    <p class="text-muted small mb-2">Optional deep-link data (sends route info to app)</p>
+                    <div class="row mb-3">
+                        <div class="col">
+                            <label class="form-label">Route</label>
+                            <input type="text" name="route" class="form-control"
+                                placeholder="e.g. home, offers, booking">
+                        </div>
+                        <div class="col">
+                            <label class="form-label">Promo Code</label>
+                            <input type="text" name="promo_code" class="form-control" placeholder="e.g. WELCOME50">
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-success w-100 py-2">
+                        <i class="fas fa-paper-plane me-2"></i>Send Notification
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Sidebar -->
+    <div class="col-lg-5">
+        <div class="card shadow-sm mb-3">
+            <div class="card-header bg-dark text-white fw-bold">📊 Device Stats</div>
+            <div class="card-body p-0">
+                <table class="table table-sm mb-0">
+                    <tbody>
+                        <tr>
+                            <td>All users with devices</td>
+                            <td class="text-end fw-bold">{{ total_devices }}</td>
+                        </tr>
+                        <tr>
+                            <td>Turf Owners</td>
+                            <td class="text-end fw-bold">{{ owner_devices }}</td>
+                        </tr>
+                        <tr>
+                            <td>Customers</td>
+                            <td class="text-end fw-bold">{{ customer_devices }}</td>
+                        </tr>
+                        <tr>
+                            <td>Recent Bookers (30d)</td>
+                            <td class="text-end fw-bold">{{ recent_devices }}</td>
+                        </tr>
+                        <tr>
+                            <td>Inactive (>30d)</td>
+                            <td class="text-end fw-bold">{{ inactive_devices }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card border-success shadow-sm">
+            <div class="card-header bg-success text-white fw-bold">💡 Tips</div>
+            <div class="card-body small">
+                <ul class="mb-0">
+                    <li><strong>All Users</strong> — sends to every device that has ever logged in and granted
+                        notification permission.</li>
+                    <li><strong>Recent Bookers</strong> — great for re-engagement promos.</li>
+                    <li><strong>Inactive</strong> — win back users who haven't booked in 30 days.</li>
+                    <li>Add a <strong>promo_code</strong> to deep-link users to the offers screen.</li>
+                    <li>Tokens are updated <strong>automatically</strong> on every login — no manual pasting needed.
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const sel = document.getElementById('targetSelect');
+    const tokenSec = document.getElementById('tokenSection');
+    sel.addEventListener('change', function () {
+        tokenSec.classList.toggle('d-none', this.value !== 'token');
+    });
+</script>
+{% endblock %}

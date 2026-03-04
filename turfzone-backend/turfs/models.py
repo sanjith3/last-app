@@ -202,10 +202,16 @@ class TurfImage(models.Model):
     caption = models.CharField(max_length=255, blank=True, null=True)
     is_cover = models.BooleanField(default=False)
     uploaded_at = models.DateTimeField(auto_now_add=True)
-    
+
+    # Optional crop metadata (0.0–1.0 relative values, saved when owner crops)
+    crop_x = models.FloatField(default=0.0)
+    crop_y = models.FloatField(default=0.0)
+    crop_width = models.FloatField(default=1.0)
+    crop_height = models.FloatField(default=1.0)
+
     def __str__(self):
         return f"Image: {self.turf.name}"
-    
+
     class Meta:
         ordering = ['-is_cover', '-uploaded_at']
 
@@ -343,3 +349,26 @@ class BlockedSlot(models.Model):
 
     def __str__(self):
         return f"BLOCKED: {self.slot_master} on {self.date} — {self.reason}"
+
+
+class TurfEditHistory(models.Model):
+    """
+    Audit log for turf detail edits made by owners.
+    Created automatically when an owner PATCHes their turf details.
+    Admin can review what changed (old vs new) without needing to approve.
+    """
+    turf = models.ForeignKey(Turf, on_delete=models.CASCADE, related_name='edit_history')
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='turf_edits')
+    edited_at = models.DateTimeField(auto_now_add=True)
+    changes = models.JSONField(
+        help_text='Dict of {field: {old: ..., new: ...}} for changed fields only'
+    )
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-edited_at']
+        verbose_name = 'Turf Edit History'
+        verbose_name_plural = 'Turf Edit Histories'
+
+    def __str__(self):
+        return f"Edit: {self.turf.name} by {self.owner.username} at {self.edited_at:%d %b %Y %H:%M}"

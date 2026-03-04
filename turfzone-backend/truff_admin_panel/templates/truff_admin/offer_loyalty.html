@@ -1,0 +1,139 @@
+{% extends "truff_admin/base.html" %}
+{% block title %}Loyalty Tiers — Truff-Admin{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:center;">
+    <div>
+        <h1>🏅 Loyalty Tiers</h1>
+        <p class="subtitle">Bronze → Silver → Gold → Platinum — earn status through bookings.</p>
+    </div>
+    <a href="/truff-admin/offers/" class="btn btn-outline">← All Offers</a>
+</div>
+
+{% if request.GET.saved %}
+<div class="alert alert-success" style="margin-bottom:16px;">✅ Changes saved successfully.</div>
+{% endif %}
+
+<div style="display:grid;grid-template-columns:1.5fr 1fr;gap:24px;">
+
+    <!-- Config -->
+    <div class="card">
+        <div class="card-header">
+            <h2 style="margin:0;">Tier Configuration</h2>
+        </div>
+        <form method="post" style="padding:20px;" id="loyalty-form">
+            {% csrf_token %}
+            <input type="hidden" name="tiers_json" id="tiers-json">
+            <input type="hidden" name="perks_json" id="perks-json">
+
+            <label style="display:flex;align-items:center;gap:10px;margin-bottom:20px;cursor:pointer;">
+                <input type="checkbox" name="is_active" {% if cfg.is_active %}checked{% endif %}
+                    style="width:20px;height:20px;accent-color:#1DB954;">
+                <span style="font-weight:600;font-size:15px;">Enable Loyalty Tiers</span>
+            </label>
+
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Tier Name</th>
+                        <th>Min Bookings</th>
+                        <th>Perk Description</th>
+                        <th>Users</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="loyalty-body">
+                    {% for lvl in levels %}
+                    <tr>
+                        <td><input type="text" class="form-control l-name" value="{{ lvl.name }}" placeholder="Bronze"
+                                style="width:90px;"></td>
+                        <td><input type="number" class="form-control l-threshold" value="{{ lvl.threshold }}" min="1"
+                                style="width:80px;"></td>
+                        <td><input type="text" class="form-control l-perk" value="{{ lvl.perk }}"
+                                placeholder="5% cashback" style="width:160px;"></td>
+                        <td><span class="badge badge-info">{{ lvl.count }}</span></td>
+                        <td><button type="button" class="btn btn-sm btn-danger"
+                                onclick="this.closest('tr').remove()">🗑</button></td>
+                    </tr>
+                    {% empty %}
+                    <tr id="empty-row">
+                        <td colspan="5" style="text-align:center;color:#888;">No tiers configured.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            <div style="margin-top:12px;display:flex;gap:8px;">
+                <button type="button" class="btn btn-outline" onclick="addRow()">➕ Add Tier</button>
+                <button type="submit" class="btn btn-primary" onclick="collect()">💾 Save Changes</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Distribution -->
+    <div class="card">
+        <div class="card-header">
+            <h2 style="margin:0;">Users by Tier</h2>
+        </div>
+        <div style="padding:20px;">
+            {% for lvl in levels %}
+            {% with colors="CD7F32,9E9E9E,FFC107,7C3AED" %}
+            <div
+                style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f0f0f0;">
+                <div>
+                    <span style="font-weight:700;font-size:15px;">{{ lvl.name }}</span><br>
+                    <span style="font-size:12px;color:#666;">{{ lvl.perk }}</span>
+                </div>
+                <div style="text-align:right;">
+                    <span style="font-size:20px;font-weight:700;">{{ lvl.count }}</span><br>
+                    <span style="font-size:11px;color:#888;">{{ lvl.threshold }}+ bookings</span>
+                </div>
+            </div>
+            {% endwith %}
+            {% empty %}
+            <p style="color:#888;">No tier data yet.</p>
+            {% endfor %}
+
+            <div style="margin-top:16px;">
+                <div class="stat-card">
+                    <div class="stat-label">Total Perks Cost</div>
+                    <div class="stat-value">₹{{ total_cost|floatformat:0 }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    function addRow() {
+        const empty = document.getElementById('empty-row');
+        if (empty) empty.remove();
+        const TIER_NAMES = ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond'];
+        const idx = document.querySelectorAll('#loyalty-body tr').length;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+        <td><input type="text" class="form-control l-name" value="${TIER_NAMES[idx] || 'Tier'}" style="width:90px;"></td>
+        <td><input type="number" class="form-control l-threshold" value="${(idx + 1) * 10}" min="1" style="width:80px;"></td>
+        <td><input type="text" class="form-control l-perk" value="5% cashback" style="width:160px;"></td>
+        <td>—</td>
+        <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">🗑</button></td>
+    `;
+        document.getElementById('loyalty-body').appendChild(tr);
+    }
+
+    function collect() {
+        const tiers = [], perks = [];
+        document.querySelectorAll('#loyalty-body tr').forEach(tr => {
+            const th = tr.querySelector('.l-threshold');
+            const pk = tr.querySelector('.l-perk');
+            if (th && pk) {
+                tiers.push(parseInt(th.value));
+                perks.push(pk.value);
+            }
+        });
+        document.getElementById('tiers-json').value = JSON.stringify(tiers);
+        document.getElementById('perks-json').value = JSON.stringify(perks);
+    }
+</script>
+{% endblock %}
