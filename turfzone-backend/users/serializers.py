@@ -40,9 +40,10 @@ class CustomUserRegistrationSerializer(serializers.ModelSerializer):
 
 
 class CustomUserDetailSerializer(serializers.ModelSerializer):
-    """Detailed user info."""
+    """Detailed user info — stats computed live from DB (no stale counters)."""
     available_credits = serializers.SerializerMethodField()
-    
+    total_bookings = serializers.SerializerMethodField()
+
     class Meta:
         model = User
         fields = [
@@ -52,12 +53,25 @@ class CustomUserDetailSerializer(serializers.ModelSerializer):
             'referral_code', 'wallet_balance', 'referral_cashback_earned',
             'total_referrals', 'qualified_referrals',
             'first_booking_completed',
-            'created_at', 'updated_at'
+            'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
-    
+
+    def get_total_bookings(self, obj):
+        """
+        Live count from Booking table — only confirmed/completed bookings.
+        Excludes pending and cancelled so the profile shows meaningful bookings.
+        """
+        from bookings.models import Booking, BookingStatus
+        return Booking.objects.filter(
+            user=obj,
+            booking_status__in=[BookingStatus.CONFIRMED, BookingStatus.COMPLETED],
+        ).count()
+
     def get_available_credits(self, obj):
-        return obj.available_credits
+        """Derived from stored credit counters (these ARE kept in sync by booking flow)."""
+        return max(0, obj.total_credits - obj.used_credits)
+
 
 
 class TurfOwnerProfileSerializer(serializers.ModelSerializer):

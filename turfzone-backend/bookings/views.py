@@ -482,9 +482,9 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         return Response({
             'success': True,
-            'scheduled': BookingListSerializer(scheduled, many=True).data,
-            'completed': BookingListSerializer(completed, many=True).data,
-            'cancelled': BookingListSerializer(cancelled, many=True).data,
+            'scheduled': BookingListSerializer(scheduled, many=True, context={'request': request}).data,
+            'completed': BookingListSerializer(completed, many=True, context={'request': request}).data,
+            'cancelled': BookingListSerializer(cancelled, many=True, context={'request': request}).data,
             '_debug': {
                 'request_user_id': request.user.id,
                 'request_user_role': getattr(request.user, 'role', 'NO_ROLE_ATTR'),

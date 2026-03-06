@@ -29,8 +29,50 @@ logger = logging.getLogger(__name__)
 # OTP ViewSet
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Temp-token helpers (HMAC-signed, no extra dependencies)
+# ---------------------------------------------------------------------------
+
+import hmac as _hmac
+import hashlib as _hashlib
+import time as _time
+import base64 as _base64
+import json as _json_mod
+
+
+def _generate_temp_token(phone: str, purpose: str, ttl: int = 300) -> str:
+    """Return a base64-encoded HMAC-signed token encoding phone, purpose, expiry."""
+    secret = settings.SECRET_KEY.encode()
+    expires_at = int(_time.time()) + ttl
+    payload = _json_mod.dumps({'phone': phone, 'purpose': purpose, 'exp': expires_at})
+    sig = _hmac.new(secret, payload.encode(), _hashlib.sha256).hexdigest()
+    combined = _json_mod.dumps({'payload': payload, 'sig': sig})
+    return _base64.urlsafe_b64encode(combined.encode()).decode()
+
+
+def _verify_temp_token(token: str):
+    """Decode and verify a temp token. Returns payload dict or None if invalid/expired."""
+    try:
+        secret = settings.SECRET_KEY.encode()
+        combined = _json_mod.loads(_base64.urlsafe_b64decode(token.encode()).decode())
+        payload_str = combined['payload']
+        expected_sig = _hmac.new(secret, payload_str.encode(), _hashlib.sha256).hexdigest()
+        if not _hmac.compare_digest(expected_sig, combined['sig']):
+            return None
+        payload = _json_mod.loads(payload_str)
+        if int(_time.time()) > payload['exp']:
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# OTP ViewSet
+# ---------------------------------------------------------------------------
+
 class OTPViewSet(viewsets.ViewSet):
-    """OTP send and verify endpoints."""
+    """OTP send, verify, complete-registration, and reset-password endpoints."""
 
     permission_classes = [AllowAny]
 
@@ -40,16 +82,37 @@ class OTPViewSet(viewsets.ViewSet):
         Send OTP to a phone number.
 
         POST /api/users/otp/send_otp/
-        Body: {"phone": "9876543210"}
+        Body: {"phone": "9876543210", "purpose": "registration"|"reset"}
         """
         phone = request.data.get('phone', '').strip()
+        purpose = request.data.get('purpose', '').strip()
 
         if not phone or len(phone) < 10:
             return Response({'error': 'Valid phone number required'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Rate limit: max 5 OTPs per phone per hour
+        if purpose not in ('registration', 'reset', ''):
+            return Response({'error': 'Invalid purpose'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # For password reset: verify account exists BEFORE sending OTP
+        # (fail fast so the user doesn't waste time completing OTP verification)
+        if purpose == 'reset':
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            user_exists = (
+                User.objects.filter(username=phone).exists()
+                or User.objects.filter(phone_number=phone).exists()
+                or User.objects.filter(email__startswith=phone + '@').exists()
+            )
+            if not user_exists:
+                return Response(
+                    {'error': 'No account registered with this phone number.'},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+        # Rate limit: max 5 OTPs per (phone, purpose) per hour
         recent_count = OTPRequest.objects.filter(
             phone=phone,
+            purpose=purpose,
             created_at__gte=timezone.now() - timedelta(hours=1),
         ).count()
 
@@ -66,52 +129,56 @@ class OTPViewSet(viewsets.ViewSet):
         OTPRequest.objects.create(
             phone=phone,
             code=code,
+            purpose=purpose,
             expires_at=expires_at,
         )
 
         otp_mode = getattr(settings, 'OTP_MODE', 'demo')
 
         if otp_mode == 'demo':
-            logger.info(f"[DEMO OTP] Phone: {phone}, Code: {code}")
+            logger.info(f"[DEMO OTP] Phone: {phone}, Purpose: {purpose}, Code: {code}")
             return Response({
                 'success': True,
                 'message': 'OTP sent (demo mode). Use 123456 for testing.',
                 'demo_code': code,
             })
 
-        # Production mode — integrate with SMS provider here
-        # sms_api_key = getattr(settings, 'SMS_API_KEY', '')
+        # Production — integrate SMS provider here
         # send_sms(phone, f"Your TurfZone OTP is {code}")
-
         return Response({'success': True, 'message': 'OTP sent to your phone.'})
 
     @action(detail=False, methods=['post'])
     def verify_otp(self, request):
         """
-        Verify OTP code.
+        Verify OTP code. Returns a short-lived temp token on success.
 
         POST /api/users/otp/verify_otp/
-        Body: {"phone": "9876543210", "code": "123456"}
+        Body: {"phone": "9876543210", "code": "123456", "purpose": "registration"|"reset"}
         """
         phone = request.data.get('phone', '').strip()
         code = request.data.get('code', '').strip()
+        purpose = request.data.get('purpose', '').strip()
 
         if not phone or not code:
             return Response({'error': 'Phone and code are required'}, status=status.HTTP_400_BAD_REQUEST)
 
         otp_mode = getattr(settings, 'OTP_MODE', 'demo')
 
-        # Demo mode — accept 123456
+        # Demo mode — accept 123456 as universal test code
         if otp_mode == 'demo' and code == '123456':
-            if request.user and request.user.is_authenticated:
-                request.user.is_phone_verified = True
-                request.user.save(update_fields=['is_phone_verified'])
-            return Response({'success': True, 'verified': True, 'message': 'Phone verified (demo mode).'})
+            temp_token = _generate_temp_token(phone, purpose)
+            return Response({
+                'success': True,
+                'verified': True,
+                'token': temp_token,
+                'message': 'OTP verified (demo mode).',
+            })
 
-        # Production mode — verify against stored OTP
+        # Production: verify against stored OTP
         otp = OTPRequest.objects.filter(
             phone=phone,
             code=code,
+            purpose=purpose,
             is_verified=False,
             expires_at__gt=timezone.now(),
         ).order_by('-created_at').first()
@@ -120,16 +187,126 @@ class OTPViewSet(viewsets.ViewSet):
             otp.is_verified = True
             otp.save(update_fields=['is_verified'])
 
-            if request.user and request.user.is_authenticated:
-                request.user.is_phone_verified = True
-                request.user.save(update_fields=['is_phone_verified'])
-
-            return Response({'success': True, 'verified': True})
+            temp_token = _generate_temp_token(phone, purpose)
+            return Response({'success': True, 'verified': True, 'token': temp_token})
 
         return Response(
             {'success': False, 'error': 'Invalid or expired OTP'},
             status=status.HTTP_400_BAD_REQUEST,
         )
+
+    @action(detail=False, methods=['post'])
+    def complete_registration(self, request):
+        """
+        Complete user registration after OTP verification.
+
+        POST /api/users/otp/complete_registration/
+        Body: {"name":"John","phone":"9876543210","password":"pass123","otp_token":"<token>"}
+        """
+        from .serializers import CustomUserDetailSerializer
+        from rest_framework_simplejwt.tokens import RefreshToken
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+
+        name = request.data.get('name', '').strip()
+        phone = request.data.get('phone', '').strip()
+        password = request.data.get('password', '').strip()
+        otp_token = request.data.get('otp_token', '').strip()
+
+        if not all([name, phone, password, otp_token]):
+            return Response({'error': 'name, phone, password and otp_token are required'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate temp token
+        payload = _verify_temp_token(otp_token)
+        if not payload or payload.get('phone') != phone or payload.get('purpose') != 'registration':
+            return Response(
+                {'error': 'Invalid or expired OTP session. Please restart verification.'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        # Idempotent: existing user + correct password → silent login
+        existing = (User.objects.filter(username=phone).first()
+                    or User.objects.filter(phone_number=phone).first())
+        if existing:
+            if existing.check_password(password):
+                refresh = RefreshToken.for_user(existing)
+                return Response({
+                    'success': True,
+                    'message': 'Welcome back! Logged in successfully.',
+                    'user': CustomUserDetailSerializer(existing).data,
+                    'tokens': {'refresh': str(refresh), 'access': str(refresh.access_token)},
+                })
+            return Response({'error': 'Phone already registered. Please log in.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Create user
+        parts = name.split()
+        first_name = parts[0][:150]
+        last_name = ' '.join(parts[1:])[:150] if len(parts) > 1 else ''
+        user = User.objects.create_user(
+            username=phone,
+            phone_number=phone,
+            first_name=first_name,
+            last_name=last_name,
+            email=f'{phone}@turfzone.app',
+            password=password,
+            is_verified=True,
+            is_phone_verified=True,
+        )
+
+        refresh = RefreshToken.for_user(user)
+        return Response({
+            'success': True,
+            'message': 'Account created successfully.',
+            'user': CustomUserDetailSerializer(user).data,
+            'tokens': {'refresh': str(refresh), 'access': str(refresh.access_token)},
+        }, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'])
+    def reset_password(self, request):
+        """
+        Reset user password after OTP verification.
+
+        POST /api/users/otp/reset_password/
+        Body: {"phone":"9876543210","new_password":"newpass123","otp_token":"<token>"}
+        """
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+
+        phone = request.data.get('phone', '').strip()
+        new_password = request.data.get('new_password', '').strip()
+        otp_token = request.data.get('otp_token', '').strip()
+
+        if not all([phone, new_password, otp_token]):
+            return Response({'error': 'phone, new_password and otp_token are required'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        if len(new_password) < 6:
+            return Response({'error': 'Password must be at least 6 characters'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate temp token
+        payload = _verify_temp_token(otp_token)
+        if not payload or payload.get('phone') != phone or payload.get('purpose') != 'reset':
+            return Response(
+                {'error': 'Invalid or expired OTP session. Please restart verification.'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        # Find user
+        user = (User.objects.filter(username=phone).first()
+                or User.objects.filter(phone_number=phone).first())
+        if not user:
+            return Response({'error': 'No account found for this phone number.'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        user.set_password(new_password)
+        user.save(update_fields=['password'])
+
+        return Response({'success': True, 'message': 'Password reset successfully. Please log in.'})
+
+
 
 
 # ---------------------------------------------------------------------------
