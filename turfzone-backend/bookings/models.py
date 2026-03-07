@@ -142,6 +142,19 @@ class Booking(models.Model):
     credits_used = models.PositiveIntegerField(default=0)
     is_first_booking = models.BooleanField(default=False)
 
+    # Coupon / promo code applied to this booking (for audit + no double-use)
+    applied_coupon = models.ForeignKey(
+        'users.PromoCode',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='bookings',
+    )
+    coupon_discount = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        default=Decimal('0.00'),
+        help_text='Coupon discount amount applied to this booking',
+    )
+
     # Idempotency key — prevents duplicate bookings from retries
     idempotency_key = models.UUIDField(unique=True, null=True, blank=True)
 

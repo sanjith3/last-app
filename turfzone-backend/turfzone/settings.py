@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     
     'rest_framework',
     'corsheaders',
+    'axes',
     
     'users',
     'turfs',
@@ -60,6 +61,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'axes.middleware.AxesMiddleware',  # BUG-04: brute-force protection (must be last)
 ]
 
 ROOT_URLCONF = 'turfzone.urls'
@@ -176,6 +178,23 @@ CORS_ALLOW_CREDENTIALS = True
 
 # Custom User Model
 AUTH_USER_MODEL = 'users.CustomUser'
+
+# ---------------------------------------------------------------------------
+# django-axes: Brute-force login protection (BUG-04)
+# ---------------------------------------------------------------------------
+AXES_ENABLED = True
+AXES_FAILURE_LIMIT = 5          # Lock after 5 failures
+AXES_COOLOFF_TIME = 0.25        # 15 minutes (in hours)
+AXES_LOCK_OUT_AT_FAILURE = True
+AXES_RESET_ON_SUCCESS = True    # Reset failure count on successful login
+AXES_LOCKOUT_PARAMETERS = ['ip_address', 'username']  # Lock per IP+username combo
+AXES_HANDLER = 'axes.handlers.database.AxesDatabaseHandler'
+
+# Required by django-axes to intercept failed authentication attempts
+AUTHENTICATION_BACKENDS = [
+    'axes.backends.AxesStandaloneBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
 
 # Logging — force every request to console
 LOGGING = {

@@ -88,7 +88,14 @@ class Turf(models.Model):
     # Metadata
     is_active = models.BooleanField(default=False)
     google_maps_share_link = models.URLField(blank=True, null=True)
-    
+
+    # Owner-initiated temporary shutdown
+    is_shutdown = models.BooleanField(default=False)
+    shutdown_start = models.DateField(null=True, blank=True)
+    shutdown_end = models.DateField(null=True, blank=True)
+    shutdown_reason = models.TextField(blank=True)
+    shutdown_notified_admin = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     approved_at = models.DateTimeField(blank=True, null=True)
@@ -100,6 +107,56 @@ class Turf(models.Model):
     def __str__(self):
         return f"{self.name} ({self.city})"
     
+    def is_active_for_booking(self):
+        """True when the turf can accept new bookings."""
+        if self.is_shutdown:
+            today = timezone.now().date()
+            if self.shutdown_start and self.shutdown_end:
+                if self.shutdown_start <= today <= self.shutdown_end:
+                    return False
+        return self.status == TurfStatus.APPROVED and self.is_active
+
+    def owner_shutdown(self, start_date, end_date, reason):
+        """Owner temporarily shuts down the turf. Notifies admins."""
+        self.is_shutdown = True
+        self.shutdown_start = start_date
+        self.shutdown_end = end_date
+        self.shutdown_reason = reason
+        self.shutdown_notified_admin = False
+        self.save(update_fields=[
+            'is_shutdown', 'shutdown_start', 'shutdown_end',
+            'shutdown_reason', 'shutdown_notified_admin',
+        ])
+        try:
+            from truff_admin_panel.utils import log_admin_action
+            from django.test import RequestFactory
+            # Lightweight audit log without a real request
+            from truff_admin_panel.models import AuditLog
+            AuditLog.objects.create(
+                action='turf_shutdown',
+                content_type='Turf',
+                object_id=self.pk,
+                details={
+                    'turf': self.name,
+                    'owner': self.owner.username,
+                    'from': str(start_date),
+                    'to': str(end_date),
+                    'reason': reason,
+                },
+            )
+        except Exception:
+            pass  # Audit log is best-effort
+
+    def owner_reactivate(self):
+        """Owner cancels shutdown — turf becomes bookable immediately."""
+        self.is_shutdown = False
+        self.shutdown_start = None
+        self.shutdown_end = None
+        self.shutdown_reason = ''
+        self.save(update_fields=[
+            'is_shutdown', 'shutdown_start', 'shutdown_end', 'shutdown_reason',
+        ])
+
     def auto_create_default_slots(self):
         """Create default hourly SlotMaster entries for all 7 days.
         Uses turf.price_per_hour as base_price. Skips if active slots already exist.

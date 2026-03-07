@@ -254,7 +254,165 @@ class TurfViewSet(viewsets.ModelViewSet):
             'today_revenue': str(agg['today_revenue'] or 0),
             'total_revenue': str(agg['total_revenue'] or 0),
             'avg_rating': round(review_agg['avg_rating'] or 0, 1),
+            'per_turf_stats': [
+                {
+                    'id': turf.id,
+                    'name': turf.name,
+                    **{
+                        k: (str(v) if 'revenue' in k else (v or 0))
+                        for k, v in Booking.objects.filter(
+                            turf=turf,
+                        ).filter(confirmed_q).aggregate(
+                            total_bookings=Count('id'),
+                            total_revenue=Sum('owner_payout'),
+                            today_bookings=Count('id', filter=Q(booking_date=today)),
+                            today_revenue=Sum('owner_payout', filter=Q(booking_date=today)),
+                        ).items()
+                    },
+                    'avg_rating': round(Review.objects.filter(turf=turf).aggregate(
+                        avg=Avg('rating')
+                    )['avg'] or 0, 1),
+                    'slots_count': turf.slot_masters.filter(is_active=True).count(),
+                    # Shutdown state
+                    'is_shutdown': turf.is_shutdown,
+                    'shutdown_start': str(turf.shutdown_start) if turf.shutdown_start else None,
+                    'shutdown_end': str(turf.shutdown_end) if turf.shutdown_end else None,
+                    'shutdown_reason': turf.shutdown_reason,
+                }
+                for turf in owner_turfs
+            ],
         })
+
+    # ─── OWNER: WEEKLY STATS ──────────────────────────────────────────────────
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated],
+            url_path='weekly_stats')
+    def weekly_stats(self, request):
+        """
+        Current-week vs last-week revenue and booking comparison.
+        GET /api/turfs/turfs/weekly_stats/
+        """
+        from datetime import timedelta
+        from django.db.models import Count, Sum, Q
+
+        user = request.user
+        today = timezone.localdate()
+        # Monday of current week
+        start_week = today - timedelta(days=today.weekday())
+        end_week = start_week + timedelta(days=6)
+        start_last = start_week - timedelta(days=7)
+        end_last = end_week - timedelta(days=7)
+
+        confirmed_q = Q(booking_status__in=['confirmed', 'completed'])
+        base_qs = Booking.objects.filter(turf__owner=user).filter(confirmed_q)
+
+        curr = base_qs.filter(booking_date__range=(start_week, end_week)).aggregate(
+            revenue=Sum('owner_payout'), bookings=Count('id'),
+        )
+        last = base_qs.filter(booking_date__range=(start_last, end_last)).aggregate(
+            revenue=Sum('owner_payout'), bookings=Count('id'),
+        )
+
+        curr_rev = float(curr['revenue'] or 0)
+        last_rev = float(last['revenue'] or 0)
+        curr_bk = curr['bookings'] or 0
+        last_bk = last['bookings'] or 0
+
+        rev_change_pct = round((curr_rev - last_rev) / last_rev * 100, 1) if last_rev else 0
+        bk_change = curr_bk - last_bk
+
+        # Per-turf breakdown for turf cards
+        owner_turfs = Turf.objects.filter(owner=user)
+        per_turf = []
+        for turf in owner_turfs:
+            tc = base_qs.filter(turf=turf, booking_date__range=(start_week, end_week)).aggregate(
+                revenue=Sum('owner_payout'), bookings=Count('id'),
+            )
+            tl = base_qs.filter(turf=turf, booking_date__range=(start_last, end_last)).aggregate(
+                revenue=Sum('owner_payout'), bookings=Count('id'),
+            )
+            t_curr_rev = float(tc['revenue'] or 0)
+            t_last_rev = float(tl['revenue'] or 0)
+            t_curr_bk = tc['bookings'] or 0
+            t_last_bk = tl['bookings'] or 0
+            t_rev_pct = round((t_curr_rev - t_last_rev) / t_last_rev * 100, 1) if t_last_rev else 0
+            per_turf.append({
+                'id': turf.id,
+                'weekly_revenue': t_curr_rev,
+                'last_week_revenue': t_last_rev,
+                'weekly_bookings': t_curr_bk,
+                'last_week_bookings': t_last_bk,
+                'revenue_change_pct': t_rev_pct,
+                'booking_change': t_curr_bk - t_last_bk,
+            })
+
+        return Response({
+            'success': True,
+            'week_start': str(start_week),
+            'week_end': str(end_week),
+            'current_week': {'revenue': curr_rev, 'bookings': curr_bk},
+            'last_week': {'revenue': last_rev, 'bookings': last_bk},
+            'changes': {'revenue_percent': rev_change_pct, 'bookings_count': bk_change},
+            'per_turf': per_turf,
+        })
+
+    # ─── OWNER: SHUTDOWN / REACTIVATE ─────────────────────────────────────────
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated],
+            url_path='owner_shutdown')
+    def owner_shutdown(self, request, pk=None):
+        """
+        Owner shuts down turf for a date range. Notifies admin via audit log.
+        POST /api/turfs/turfs/{id}/owner_shutdown/
+        Body: {start_date, end_date, reason}
+        """
+        turf = self.get_object()
+        if turf.owner != request.user:
+            return Response({'success': False, 'error': 'Not your turf.'}, status=403)
+
+        start_str = request.data.get('start_date')
+        end_str = request.data.get('end_date')
+        reason = request.data.get('reason', '').strip()
+
+        if not start_str or not end_str or not reason:
+            return Response({'success': False, 'error': 'start_date, end_date and reason are required.'}, status=400)
+
+        from datetime import date as date_type
+        try:
+            start_date = date_type.fromisoformat(start_str)
+            end_date = date_type.fromisoformat(end_str)
+        except ValueError:
+            return Response({'success': False, 'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=400)
+
+        if end_date < start_date:
+            return Response({'success': False, 'error': 'end_date must be >= start_date.'}, status=400)
+
+        turf.owner_shutdown(start_date, end_date, reason)
+        log_admin_action(request, 'turf_shutdown', 'Turf', turf.id, {
+            'turf': turf.name, 'from': str(start_date), 'to': str(end_date), 'reason': reason,
+        })
+
+        return Response({
+            'success': True,
+            'message': f'{turf.name} is now shutdown from {start_date} to {end_date}.',
+            'is_shutdown': True,
+            'shutdown_start': str(start_date),
+            'shutdown_end': str(end_date),
+        })
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated],
+            url_path='owner_reactivate')
+    def owner_reactivate(self, request, pk=None):
+        """
+        Owner cancels a shutdown immediately — no admin approval needed.
+        POST /api/turfs/turfs/{id}/owner_reactivate/
+        """
+        turf = self.get_object()
+        if turf.owner != request.user:
+            return Response({'success': False, 'error': 'Not your turf.'}, status=403)
+
+        turf.owner_reactivate()
+        log_admin_action(request, 'turf_reactivated', 'Turf', turf.id, {'turf': turf.name})
+
+        return Response({'success': True, 'message': f'{turf.name} is now active again.', 'is_shutdown': False})
 
     # ─── OWNER: UPDATE TURF DETAILS (LIVE + AUDIT LOG) ───────────────────
     @action(detail=True, methods=['patch'], permission_classes=[IsAuthenticated],

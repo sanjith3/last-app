@@ -878,22 +878,23 @@ class BookingViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def confirm(self, request):
         """
-        Atomic booking confirmation with ledger entries.
+        Atomic booking confirmation.
 
         POST /api/bookings/bookings/confirm/
-        Body: {"preview_token": "uuid-here", "total_payable": "1180.00"}
+        Body: {
+          "preview_token": "uuid-here",
+          "total_payable": "1180.00",
+          "coupon_code": "SAVE50"   <- optional, validated server-side
+        }
 
-        CONCURRENCY PROTECTION STACK:
-        1. transaction.atomic() — DB rollback on error
-        2. select_for_update() on BookingPreview — locks preview row
-        3. select_for_update() on SlotMaster — locks slot rows
-        4. BookingSlot.UniqueConstraint — DB rejects duplicate
-        5. IntegrityError catch — last-resort safety net
-        6. is_used flag — idempotency
-        7. Total re-verification — catches price drift
+        Coupon discount is computed SERVER-SIDE from coupon_code.
+        Never accept a raw coupon_discount amount from clients.
         """
+        from .services import confirm_booking
+
         token_str = request.data.get('preview_token')
         client_total = request.data.get('total_payable')
+        coupon_code = request.data.get('coupon_code', '')
 
         if not token_str or not client_total:
             return Response({
@@ -901,257 +902,28 @@ class BookingViewSet(viewsets.ModelViewSet):
                 'error': 'preview_token and total_payable are required',
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            client_total = Decimal(str(client_total))
-        except Exception:
-            return Response({
-                'success': False,
-                'error': 'total_payable must be a valid number',
-            }, status=status.HTTP_400_BAD_REQUEST)
+        result = confirm_booking(
+            user=request.user,
+            preview_token=token_str,
+            client_total=client_total,
+            coupon_code=coupon_code,
+        )
 
-        try:
-            with transaction.atomic():
-                # 1. Fetch and lock preview token
-                try:
-                    preview = BookingPreview.objects.select_for_update().get(
-                        preview_token=token_str,
-                        user=request.user,
-                    )
-                except BookingPreview.DoesNotExist:
-                    return Response({
-                        'success': False,
-                        'error': 'Invalid preview token',
-                    }, status=status.HTTP_404_NOT_FOUND)
-
-                # 2. Check idempotency — already used?
-                if preview.is_used:
-                    return Response({
-                        'success': False,
-                        'error': 'This preview token has already been used',
-                    }, status=status.HTTP_409_CONFLICT)
-
-                # 3. Check expiry
-                if preview.is_expired:
-                    return Response({
-                        'success': False,
-                        'error': 'Preview token has expired. Please create a new preview.',
-                    }, status=status.HTTP_410_GONE)
-
-                # 3b. Re-verify turf is still APPROVED (may have been suspended since preview)
-                turf = preview.turf
-                if turf.status != TurfStatus.APPROVED or not turf.is_active:
-                    return Response({
-                        'success': False,
-                        'error': 'This turf is no longer available for booking',
-                        'error_code': 'turf_not_available_unapproved',
-                    }, status=status.HTTP_400_BAD_REQUEST)
-
-                # 4. Lock SlotMaster rows (row-level lock)
-                slot_ids = [s['slot_id'] for s in preview.selected_slots]
-                slots = SlotMaster.objects.select_for_update().filter(
-                    id__in=slot_ids, turf=preview.turf,
-                )
-
-                if slots.count() != len(slot_ids):
-                    return Response({
-                        'success': False,
-                        'error': 'One or more slots are no longer valid',
-                    }, status=status.HTTP_409_CONFLICT)
-
-                # 5. Re-run compute_slot_status inside the lock (race-condition safe)
-                blocked_ids = set(
-                    BlockedSlot.objects.filter(
-                        turf=preview.turf, date=preview.booking_date,
-                    ).values_list('slot_master_id', flat=True)
-                )
-                existing_locks = set(
-                    BookingSlot.objects.select_for_update().filter(
-                        slot_master__in=slot_ids,
-                        booking_date=preview.booking_date,
-                    ).values_list('slot_master_id', flat=True)
-                )
-
-                for slot in slots:
-                    state = compute_slot_status(
-                        slot, preview.booking_date, existing_locks, blocked_ids
-                    )
-                    if state['status'] != SLOT_STATUS_AVAILABLE:
-                        error_code = _STATUS_ERROR_CODE.get(state['status'], 'slot_unavailable')
-                        return Response({
-                            'success': False,
-                            'error': f"Slot {slot.start_time.strftime('%H:%M')}-{slot.end_time.strftime('%H:%M')} is {state['status']}",
-                            'error_code': error_code,
-                        }, status=status.HTTP_400_BAD_REQUEST)
-
-                # 6. Recalculate pricing (catch any drift)
-                slots_pricing = []
-                for slot in slots.order_by('start_time'):
-                    pricing = _compute_slot_pricing(slot, preview.booking_date)
-                    slots_pricing.append(pricing)
-
-                financials = _compute_financial_breakdown(slots_pricing)
-
-                # 6b. preview.total_payable already includes first_booking_discount.
-                #     Do NOT re-subtract it — that causes the ₹50 double-deduction 409.
-
-                # 6c. Accept coupon_discount from client (≤ ₹500, validated server-side)
-                MAX_COUPON_DISCOUNT = Decimal('500.00')
-                coupon_discount = Decimal('0.00')
-                raw_coupon = request.data.get('coupon_discount', '0')
-                try:
-                    coupon_discount = min(
-                        _quantize(Decimal(str(raw_coupon))),
-                        MAX_COUPON_DISCOUNT,
-                    )
-                except Exception:
-                    coupon_discount = Decimal('0.00')
-
-                # 7. Compare total:
-                #    authoritative = preview.total_payable (post-discount) – coupon
-                #    Allow ₹1.00 tolerance to absorb float → string → Decimal drift
-                authoritative_total = _quantize(preview.total_payable - coupon_discount)
-                if abs(authoritative_total - client_total) > Decimal('1.00'):
-                    return Response({
-                        'success': False,
-                        'error': 'Price has changed since preview. Please re-preview.',
-                        'new_total_payable': str(authoritative_total),
-                        'client_total': str(client_total),
-                    }, status=status.HTTP_409_CONFLICT)
-
-                # 8. Determine booking time range from slots
-                all_start_times = [slot.start_time for slot in slots]
-                all_end_times = [slot.end_time for slot in slots]
-                start_time = min(all_start_times)
-                end_time = max(all_end_times)
-
-                # 9. Create booking
-                booking = Booking.objects.create(
-                    user=request.user,
-                    turf=preview.turf,
-                    preview=preview,
-                    booking_date=preview.booking_date,
-                    start_time=start_time,
-                    end_time=end_time,
-                    selected_slots=slots_pricing,
-                    price_per_hour=Decimal('0.00'),  # Not applicable for slot-based booking
-                    total_price=financials['subtotal'] + financials['discount_total'],
-                    discount=financials['discount_total'],
-                    final_price=financials['subtotal'],
-                    gst_amount=financials['gst_amount'],
-                    commission=financials['commission'],
-                    gst_on_commission=financials['gst_on_commission'],
-                    commission_percent=financials['commission_percent'],
-                    platform_fee=financials['platform_fee'],
-                    gst_on_platform_fee=financials['gst_on_platform_fee'],
-                    platform_revenue=financials['platform_revenue'],
-                    owner_payout=financials['owner_payout'],
-                    booking_status=BookingStatus.CONFIRMED,
-                    payment_status=PaymentStatus.PAID,
-                    idempotency_key=uuid.uuid4(),
-                )
-
-                # 10. Create BookingSlot locks — UniqueConstraint is the final safety net
-                try:
-                    BookingSlot.objects.bulk_create([
-                        BookingSlot(
-                            booking=booking,
-                            slot_master_id=sid,
-                            booking_date=preview.booking_date,
-                        )
-                        for sid in slot_ids
-                    ])
-                except IntegrityError:
-                    # UniqueConstraint fired — another booking slipped through
-                    logger.warning(
-                        f"IntegrityError: duplicate slot lock for turf={preview.turf.id} "
-                        f"date={preview.booking_date} slots={slot_ids}"
-                    )
-                    raise  # Re-raise to trigger atomic rollback
-
-                # 11. Create ledger entries (enforces debit == credit)
-                _create_ledger_entries(booking, financials)
-
-                # 12. Mark preview as used
-                preview.is_used = True
-                preview.save()
-
-                # 13. Credit system — idempotent increment
-                # Guarded by preview.is_used (step 2) — double-confirm impossible.
-                User = get_user_model()
-                user_locked = User.objects.select_for_update().get(pk=request.user.pk)
-                if not user_locked.first_booking_completed:
-                    user_locked.first_booking_completed = True
-                user_locked.total_bookings += 1
-                user_locked.total_credits += 10  # Backend rule: 10 credits per booking
-                user_locked.save(update_fields=[
-                    'total_bookings', 'total_credits', 'first_booking_completed',
-                ])
-
-                # 14. Record coupon usage — enforces one-time use per user
-                coupon_code = request.data.get('coupon_code', '').strip().upper()
-                if coupon_code and coupon_discount > Decimal('0'):
-                    try:
-                        from users.models import PromoCode, CouponUsage
-                        promo = PromoCode.objects.get(code=coupon_code, is_active=True)
-                        CouponUsage.objects.get_or_create(
-                            user=request.user,
-                            coupon=promo,
-                            defaults={'booking_id': booking.id},
-                        )
-                        # Increment global usage counter
-                        PromoCode.objects.filter(pk=promo.pk).update(
-                            current_uses=models.F('current_uses') + 1
-                        )
-                        logger.info(f"Coupon {coupon_code} recorded for user {request.user.id}")
-                    except Exception as e:
-                        # Non-fatal — booking succeeds even if coupon tracking fails
-                        logger.warning(f"Coupon usage tracking failed for {coupon_code}: {e}")
-
-                logger.info(
-
-                    f"Booking #{booking.id} confirmed: ₹{financials['total_payable']} | "
-                    f"Turf: {preview.turf.name} | Date: {preview.booking_date} | "
-                    f"Credits: {user_locked.total_credits}"
-                )
-
-                return Response({
-                    'success': True,
-                    'message': 'Booking confirmed successfully',
-                    'booking_id': booking.id,
-                    'booking_date': str(booking.booking_date),
-                    'start_time': str(booking.start_time),
-                    'end_time': str(booking.end_time),
-                    'total_payable': str(financials['total_payable']),
-                    'booking_status': booking.booking_status,
-                    'total_credits': user_locked.total_credits,
-                    'available_credits': user_locked.available_credits,
-                }, status=status.HTTP_201_CREATED)
-
-        except IntegrityError:
-            # UniqueConstraint on BookingSlot — slot was booked by another user
-            return Response({
-                'success': False,
-                'error': 'Slot is no longer available',
-            }, status=status.HTTP_409_CONFLICT)
-
-        except ValueError as e:
-            # Ledger imbalance — this is a critical error
-            logger.error(f"LEDGER IMBALANCE: {str(e)}")
-            return Response({
-                'success': False,
-                'error': 'Financial integrity error. Please contact support.',
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        except Exception as e:
-            logger.error(f"Confirm error: {str(e)}", exc_info=True)
-            return Response({
-                'success': False,
-                'error': 'An unexpected error occurred',
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+        http_status = result.pop('status_code', 201 if result['success'] else 400)
+        return Response(result, status=http_status)
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
-        """Cancel a booking. Deletes BookingSlot rows to free slots."""
+        """
+        Cancel a booking with tiered refund policy.
+
+        BUG-09 FIX: Now computes and triggers Razorpay refund based on policy:
+          > 24h before slot: 100% refund
+          6-24h before slot: 50% refund
+          < 6h  before slot: 0% refund
+        Also reverts the +10 credits earned at booking time.
+        """
+        from django.conf import settings as django_settings
+
         booking = self.get_object()
 
         if booking.user != request.user and request.user.role != 'admin':
@@ -1168,11 +940,70 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         reason = request.data.get('reason', '')
         is_admin = request.user.role == 'admin'
-        booking.cancel(reason=reason, cancelled_by_admin=is_admin)
+
+        # -- Compute hours until slot --
+        slot_start_dt = datetime.combine(booking.booking_date, booking.start_time)
+        slot_start_dt = timezone.make_aware(slot_start_dt)
+        hours_until = (slot_start_dt - timezone.now()).total_seconds() / 3600
+
+        if is_admin:
+            refund_percent = Decimal('100')
+        elif hours_until > 24:
+            refund_percent = Decimal('100')
+        elif hours_until > 6:
+            refund_percent = Decimal('50')
+        else:
+            refund_percent = Decimal('0')
+
+        refund_amount = _quantize((booking.final_price * refund_percent) / Decimal('100'))
+
+        with transaction.atomic():
+            # -- Trigger Razorpay refund if applicable --
+            refund_id = None
+            if refund_amount > Decimal('0') and booking.razorpay_payment_id:
+                try:
+                    import razorpay
+                    rp_client = razorpay.Client(auth=(
+                        django_settings.RAZORPAY_KEY_ID,
+                        django_settings.RAZORPAY_KEY_SECRET,
+                    ))
+                    refund_resp = rp_client.payment.refund(
+                        booking.razorpay_payment_id,
+                        {'amount': int(refund_amount * 100)},
+                    )
+                    refund_id = refund_resp.get('id')
+                    logger.info(
+                        f"Razorpay refund {refund_id} of ₹{refund_amount} "
+                        f"for booking #{booking.id}"
+                    )
+                except Exception as e:
+                    logger.error(f"Razorpay refund failed for booking #{booking.id}: {e}")
+                    # Continue cancellation even if refund API fails; ops team notified via logs
+
+            # -- Revert earned credits --
+            user = booking.user
+            if not booking.is_redeemed:
+                User = get_user_model()
+                User.objects.filter(pk=user.pk).update(
+                    total_credits=models.F('total_credits') - 10,
+                    total_bookings=models.F('total_bookings') - 1,
+                )
+
+            # -- Cancel the booking (also deletes slot locks) --
+            booking.booking_status = BookingStatus.CANCELLED
+            booking.cancelled_reason = reason
+            booking.cancelled_at = timezone.now()
+            booking.cancelled_by_admin = is_admin
+            booking.payment_status = PaymentStatus.REFUNDED if refund_amount > 0 else booking.payment_status
+            booking.save()
+            booking.slot_locks.all().delete()
 
         return Response({
             'success': True,
             'message': 'Booking cancelled successfully',
+            'refund_percent': str(refund_percent),
+            'refund_amount': str(refund_amount),
+            'refund_id': refund_id,
             'data': BookingDetailSerializer(booking).data,
         }, status=status.HTTP_200_OK)
 

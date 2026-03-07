@@ -72,34 +72,13 @@ class UserRegistrationViewSet(viewsets.ViewSet):
         is_duplicate = any('already exists' in str(e) for e in username_errors)
 
         if is_duplicate:
-            username = request.data.get('username', '').strip()
-            password = request.data.get('password', '')
-
-            # Try to find existing user by username or phone_number
-            existing = (
-                User.objects.filter(username=username).first()
-                or User.objects.filter(phone_number=username).first()
-            )
-
-            if existing and existing.check_password(password):
-                # Correct password → silent auto-login (idempotent registration)
-                refresh = RefreshToken.for_user(existing)
-                return Response({
-                    'success': True,
-                    'message': 'Welcome back! Logged in successfully.',
-                    'user': CustomUserDetailSerializer(existing).data,
-                    'tokens': {
-                        'refresh': str(refresh),
-                        'access': str(refresh.access_token),
-                    }
-                }, status=status.HTTP_200_OK)
-            else:
-                # Wrong password — tell user they're already registered
-                return Response({
-                    'success': False,
-                    'error': 'This phone number is already registered. Please log in instead.',
-                    'error_code': 'already_registered',
-                }, status=status.HTTP_400_BAD_REQUEST)
+            # BUG-05 FIX: Always return 409 — never silently log in via /register/
+            # This prevents bypassing future OTP verification at registration.
+            return Response({
+                'success': False,
+                'error': 'This phone number is already registered. Please log in instead.',
+                'error_code': 'already_registered',
+            }, status=status.HTTP_409_CONFLICT)
 
         return Response({
             'success': False,
@@ -246,7 +225,7 @@ class UserLoginViewSet(viewsets.ViewSet):
         Login user with username and password.
         Link: POST /api/users/user-login/login/
         """
-        print(f"DEBUG: Login attempt for: {request.data.get('username')}")
+        logger.debug("Login attempt for: %s", request.data.get('username'))
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
             try:
@@ -263,7 +242,7 @@ class UserLoginViewSet(viewsets.ViewSet):
                 if user:
                     if user.check_password(serializer.validated_data['password']):
                         refresh = RefreshToken.for_user(user)
-                        print(f"DEBUG: Login successful for: {user.username}")
+                        logger.debug("Login successful for: %s", user.username)
                         return Response({
                             'success': True,
                             'message': 'Login successful',
@@ -274,22 +253,26 @@ class UserLoginViewSet(viewsets.ViewSet):
                             }
                         }, status=status.HTTP_200_OK)
                     else:
-                        print(f"DEBUG: Password check failed for: {user.username}")
+                        logger.debug("Password check failed for: %s", user.username)
+
                 else:
-                    print(f"DEBUG: User not found: {username_or_phone}")
+                    logger.debug("User not found: %s", username_or_phone)
+
 
                 return Response({
                     'success': False,
                     'error': 'Invalid credentials'
                 }, status=status.HTTP_401_UNAUTHORIZED)
             except Exception as e:
-                print(f"DEBUG: Login error: {str(e)}")
+                logger.error("Login error: %s", str(e), exc_info=True)
+
                 return Response({
                     'success': False,
                     'error': 'An error occurred during login'
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-        print(f"DEBUG: Serializer invalid: {serializer.errors}")
+        logger.debug("Login serializer invalid: %s", serializer.errors)
+
         return Response({
             'success': False,
             'errors': serializer.errors
@@ -444,10 +427,12 @@ class UserProfileViewSet(viewsets.ViewSet):
                 }, status=status.HTTP_201_CREATED)
                 
         except Exception as e:
+            # BUG-08 FIX: Never expose internal error details to clients
+            logger.exception(f"Error in become_partner for user {user.id}: {e}")
             return Response({
                 'success': False,
-                'error': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
+                'error': 'An unexpected error occurred. Please try again later.',
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['post'])
     def change_password(self, request):
@@ -571,8 +556,25 @@ class UserProfileViewSet(viewsets.ViewSet):
 
 
 class TurfOwnerProfileViewSet(viewsets.ReadOnlyModelViewSet):
-    """ViewSet for viewing turf owner profiles."""
-    queryset = TurfOwner.objects.all()
+    """ViewSet for viewing turf owner profiles.
+
+    BUG-07 FIX: Regular users can only see their own profile.
+    Admins can see all profiles.
+    """
     serializer_class = TurfOwnerProfileSerializer
     permission_classes = [IsAuthenticated]
     lookup_field = 'user_id'
+
+    def get_queryset(self):
+        user = self.request.user
+        if getattr(user, 'role', '') == 'admin' or user.is_staff:
+            return TurfOwner.objects.all()
+        return TurfOwner.objects.filter(user=user)
+
+    def get_object(self):
+        obj = super().get_object()
+        user = self.request.user
+        if obj.user != user and getattr(user, 'role', '') != 'admin' and not user.is_staff:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('You do not have permission to view this profile.')
+        return obj

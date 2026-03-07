@@ -971,3 +971,146 @@ def register_fcm_token(request):
     return Response({'success': True, 'message': 'FCM token registered.'})
 
 
+
+
+# ---------------------------------------------------------------------------
+# Coupon function-based views  (imported by users/coupon_urls.py)
+# ---------------------------------------------------------------------------
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def validate_coupon(request):
+    """
+    Validate a promo code and return discount details.
+
+    POST /api/coupons/validate/
+    Body: {"code": "SAVE20", "amount": "500.00"}
+    """
+    from decimal import Decimal, InvalidOperation
+    from .models import CouponUsage
+
+    code = request.data.get('code', '').strip().upper()
+    try:
+        amount = Decimal(str(request.data.get('amount', '0')))
+    except (InvalidOperation, TypeError):
+        amount = Decimal('0')
+
+    if not code:
+        return Response({'valid': False, 'message': 'Coupon code is required'}, status=400)
+
+    try:
+        promo = PromoCode.objects.get(code=code, is_active=True)
+    except PromoCode.DoesNotExist:
+        return Response({'valid': False, 'message': 'Invalid coupon code'})
+
+    now = timezone.now()
+    if promo.valid_from > now or promo.valid_until < now:
+        return Response({'valid': False, 'message': 'Coupon has expired'})
+
+    if promo.current_uses >= promo.max_uses:
+        return Response({'valid': False, 'message': 'Coupon usage limit reached'})
+
+    already_used = CouponUsage.objects.filter(user=request.user, coupon=promo).exists()
+    if already_used:
+        return Response({'valid': False, 'message': 'You have already used this coupon'})
+
+    if amount < promo.min_order_value:
+        return Response({
+            'valid': False,
+            'message': f'Minimum booking value of Rs.{promo.min_order_value} required',
+        })
+
+    from decimal import Decimal as D
+    if promo.discount_type == 'percentage':
+        discount = amount * promo.discount_value / D('100')
+        if promo.max_discount:
+            discount = min(discount, promo.max_discount)
+    else:
+        discount = promo.discount_value
+
+    discount = discount.quantize(D('0.01'))
+
+    return Response({
+        'valid': True,
+        'code': promo.code,
+        'discount': str(discount),
+        'discount_type': promo.discount_type,
+        'discount_value': str(promo.discount_value),
+        'message': f'Coupon applied! You save Rs.{discount}',
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_available_offers(request):
+    """
+    Return all available offers for the current user, split into:
+      admin_coupons  - global PromoCode offers set by Truff-Admin
+      owner_offers   - turf-specific offers (empty until SlotOffer model added)
+      offers         - legacy flat list for backward compatibility
+
+    GET /api/coupons/available/?amount=999&turf_id=3
+    """
+    from decimal import Decimal, InvalidOperation
+    from django.db import models as dj_models
+    from .models import CouponUsage
+
+    try:
+        amount = Decimal(str(request.query_params.get('amount', '0')))
+    except (InvalidOperation, TypeError):
+        amount = Decimal('0')
+
+    now = timezone.now()
+
+    used_ids = CouponUsage.objects.filter(
+        user=request.user
+    ).values_list('coupon_id', flat=True)
+
+    admin_qs = PromoCode.objects.filter(
+        is_active=True,
+        valid_from__lte=now,
+        valid_until__gte=now,
+        current_uses__lt=dj_models.F('max_uses'),
+    ).exclude(id__in=used_ids).order_by('-valid_until')
+
+    admin_coupons = []
+    for p in admin_qs:
+        if p.discount_type == 'percentage':
+            saving = f'{p.discount_value:.0f}% OFF'
+            if p.max_discount:
+                saving += f' (up to Rs.{p.max_discount:.0f})'
+            desc = f'{p.discount_value:.0f}% off on your booking'
+        else:
+            saving = f'Rs.{p.discount_value:.0f} OFF'
+            desc = f'Flat Rs.{p.discount_value:.0f} off'
+
+        if p.min_order_value > 0:
+            desc += f' (min Rs.{p.min_order_value:.0f})'
+
+        admin_coupons.append({
+            'code': p.code,
+            'description': desc,
+            'discount_type': p.discount_type,
+            'discount_value': str(p.discount_value),
+            'min_order_value': str(p.min_order_value),
+            'max_discount': str(p.max_discount) if p.max_discount else None,
+            'valid_until': p.valid_until.isoformat(),
+            'saving': saving,
+            'eligible': amount >= p.min_order_value,
+        })
+
+    # Owner offers: placeholder until SlotOffer model is introduced
+    owner_offers = []
+
+    # Legacy flat list so existing Flutter _availableOffers keeps working
+    offers_flat = [
+        {'code': c['code'], 'saving': c['saving'], 'desc': c['description']}
+        for c in admin_coupons
+    ]
+
+    return Response({
+        'success': True,
+        'admin_coupons': admin_coupons,
+        'owner_offers': owner_offers,
+        'offers': offers_flat,
+    })

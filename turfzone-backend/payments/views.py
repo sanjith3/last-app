@@ -176,63 +176,30 @@ def verify_payment(request):
     except BookingPreview.DoesNotExist:
         return Response({'error': 'Invalid or already used preview token'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Now use the existing confirm flow via internal call
-    # We import the confirm helper here to reuse the existing atomic logic
-    from bookings.views import BookingViewSet
-    from rest_framework.test import APIRequestFactory
-    from django.test import RequestFactory
+    # Now confirm via the shared service (no TestRequestFactory hack)
+    from bookings.services import confirm_booking
+    from decimal import Decimal
 
-    # Build a synthetic request for the confirm endpoint
-    factory = RequestFactory()
-    confirm_request = factory.post(
-        '/api/bookings/bookings/confirm/',
-        data=json.dumps({
-            'preview_token': str(preview_token),
-            'total_payable': str(total_payable or preview.total_payable),
-        }),
-        content_type='application/json',
+    result = confirm_booking(
+        user=request.user,
+        preview_token=str(preview_token),
+        client_total=Decimal(str(total_payable or preview.total_payable)),
+        coupon_code='',
+        razorpay_order_id=razorpay_order_id,
+        razorpay_payment_id=razorpay_payment_id,
+        razorpay_signature=razorpay_signature,
     )
-    confirm_request.user = request.user
 
-    # Wrap in DRF request
-    from rest_framework.request import Request as DRFRequest
-    from rest_framework.parsers import JSONParser
-    drf_request = DRFRequest(confirm_request, parsers=[JSONParser()])
-
-    viewset = BookingViewSet()
-    viewset.request = drf_request
-    viewset.format_kwarg = None
-
-    try:
-        response = viewset.confirm(drf_request)
-    except Exception as e:
-        logger.error(f"Booking confirmation after payment failed: {e}")
-        return Response(
-            {'error': 'Booking confirmation failed after payment. Contact support.', 'payment_id': razorpay_payment_id},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
-
-    if response.status_code in (200, 201):
-        # Update the booking with Razorpay details
-        booking_id = response.data.get('booking_id')
-        if booking_id:
-            try:
-                booking = Booking.objects.get(id=booking_id)
-                booking.razorpay_order_id = razorpay_order_id
-                booking.razorpay_payment_id = razorpay_payment_id
-                booking.razorpay_signature = razorpay_signature
-                booking.save(update_fields=['razorpay_order_id', 'razorpay_payment_id', 'razorpay_signature'])
-            except Booking.DoesNotExist:
-                pass
-
+    if result.get('success'):
         return Response({
             'success': True,
-            'booking_id': booking_id,
+            'booking_id': result.get('booking_id'),
             'payment_id': razorpay_payment_id,
             'message': 'Payment verified and booking confirmed!',
         })
     else:
-        return Response(response.data, status=response.status_code)
+        http_status = result.pop('status_code', 400)
+        return Response(result, status=http_status)
 
 
 @csrf_exempt
