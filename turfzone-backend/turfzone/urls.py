@@ -7,6 +7,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.http import JsonResponse
 from django.views.generic import TemplateView
+from pathlib import Path
 
 
 def health_check(request):
@@ -18,9 +19,14 @@ def health_check(request):
     })
 
 
+# Landing page only if trufspot-landing directory exists
+_landing_dir = Path(settings.BASE_DIR).parent.parent / 'trufspot-landing'
+
 urlpatterns = [
-    # Landing page at root
-    path('', TemplateView.as_view(template_name='index.html'), name='landing'),
+    # Landing page at root (or health check fallback on cloud deployments)
+    path('', TemplateView.as_view(template_name='index.html'), name='landing')
+    if (_landing_dir / 'index.html').exists()
+    else path('', health_check, name='landing'),
 
     path('admin/', admin.site.urls),
     path('api/health/', health_check),

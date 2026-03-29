@@ -93,13 +93,15 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'turfzone.urls'
 
+# Landing page directory (may not exist on cloud deployments)
+_LANDING_DIR = BASE_DIR.parent.parent / 'trufspot-landing'
+
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
         'DIRS': [
             BASE_DIR / 'templates',
-            BASE_DIR.parent.parent / 'trufspot-landing',  # Landing page
-        ],
+        ] + ([_LANDING_DIR] if _LANDING_DIR.exists() else []),
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -168,7 +170,9 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [
-    BASE_DIR.parent.parent / 'trufspot-landing',  # Landing page CSS/JS/assets
+    d for d in [
+        _LANDING_DIR,  # Landing page CSS/JS/assets (if present)
+    ] if d.exists()
 ]
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 MEDIA_URL = '/media/'
