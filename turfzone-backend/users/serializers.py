@@ -20,8 +20,8 @@ class CustomUserBasicSerializer(serializers.ModelSerializer):
 
 class CustomUserRegistrationSerializer(serializers.ModelSerializer):
     """Serializer for user registration."""
-    password = serializers.CharField(write_only=True, min_length=6)
-    password_confirm = serializers.CharField(write_only=True, min_length=6)
+    password = serializers.CharField(write_only=True, min_length=6, max_length=128)
+    password_confirm = serializers.CharField(write_only=True, min_length=6, max_length=128)
     
     class Meta:
         model = User
@@ -53,9 +53,13 @@ class CustomUserDetailSerializer(serializers.ModelSerializer):
             'referral_code', 'wallet_balance', 'referral_cashback_earned',
             'total_referrals', 'qualified_referrals',
             'first_booking_completed',
+            'loyalty_tier', 'free_booking_counter', 'free_booking_available', 'date_of_birth',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id', 'loyalty_tier', 'free_booking_counter', 'free_booking_available',
+            'created_at', 'updated_at'
+        ]
 
     def get_total_bookings(self, obj):
         """
@@ -96,14 +100,14 @@ class TurfOwnerRegistrationSerializer(serializers.Serializer):
     Supports multi-turf: if the email belongs to an existing turf_owner,
     we reuse their account instead of blocking registration.
     """
-    username = serializers.CharField(min_length=3)
-    email = serializers.EmailField()
-    password = serializers.CharField(write_only=True, min_length=6, required=False)
-    password_confirm = serializers.CharField(write_only=True, min_length=6, required=False)
-    first_name = serializers.CharField()
-    last_name = serializers.CharField(required=False, allow_blank=True)
-    phone_number = serializers.CharField()
-    google_maps_share_link = serializers.URLField()
+    username = serializers.CharField(min_length=3, max_length=150)
+    email = serializers.EmailField(max_length=254)
+    password = serializers.CharField(write_only=True, min_length=6, max_length=128, required=False)
+    password_confirm = serializers.CharField(write_only=True, min_length=6, max_length=128, required=False)
+    first_name = serializers.CharField(max_length=150)
+    last_name = serializers.CharField(required=False, allow_blank=True, max_length=150)
+    phone_number = serializers.CharField(max_length=15)
+    google_maps_share_link = serializers.URLField(max_length=2048)
     
     def validate(self, data):
         # Look up existing user by phone number first, then email
@@ -175,8 +179,8 @@ class TurfOwnerRegistrationSerializer(serializers.Serializer):
 
 class LoginSerializer(serializers.Serializer):
     """Serializer for user login."""
-    username = serializers.CharField()
-    password = serializers.CharField(write_only=True)
+    username = serializers.CharField(max_length=254)  # covers phone, email, username
+    password = serializers.CharField(write_only=True, max_length=128)
 
 
 class ChangePasswordSerializer(serializers.Serializer):

@@ -146,6 +146,10 @@
                     class="{% if 'settings' in request.resolver_match.url_name %}active{% endif %}">
                     <span class="icon">⚙️</span> Settings
                 </a></li>
+            <li><a href="/truff-admin/otp-test/"
+                    class="{% if 'otp' in request.resolver_match.url_name %}active{% endif %}">
+                    <span class="icon">🔐</span> OTP Test
+                </a></li>
             <div class="sidebar-divider"></div>
             <li><a href="/truff-admin/logout/">
                     <span class="icon">🚪</span> Logout

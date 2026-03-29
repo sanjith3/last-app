@@ -7,6 +7,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.db.models import Q, Prefetch
+from django.core.cache import cache
+from django.conf import settings as django_settings
 from django.utils import timezone
 from datetime import datetime
 import logging
@@ -57,25 +59,43 @@ class TurfViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """Filter turfs based on user role and status."""
+        from django.db.models import Q
         user = self.request.user
-        
-        # Base queryset with necessary relations
+
+        # Base queryset with necessary relations — avoids N+1 on list/retrieve
         queryset = Turf.objects.select_related('owner').prefetch_related(
             'sports', 'amenities', 'images'
         ).distinct()
-        
-        if not user or user.is_anonymous:
-            # Anonymous users see only approved and active turfs
-            return queryset.filter(status=TurfStatus.APPROVED, is_active=True)
-            
-        if user.role == 'admin':
-            # Admins see all turfs
+
+        # Admins see all turfs
+        if user and user.is_authenticated and (getattr(user, 'role', '') == 'admin' or getattr(user, 'is_staff', False)):
             return queryset
-            
-        # Authenticated users: approved+active turfs for public browsing,
-        # PLUS the user's own turfs at any status (needed for upload_image on pending turfs).
+
+        # Anonymous users only see approved, active, non-shutdown turfs
+        if not user or user.is_anonymous:
+            return queryset.filter(
+                status=TurfStatus.APPROVED,
+                is_active=True,
+                is_shutdown=False,
+            )
+
+        # For PUBLIC lists, explicitly deny seeing own pending turfs.
+        # my_turfs check is handled primarily inside list(), but we restrict here as well.
+        if self.action == 'list' and self.request.query_params.get('my_turfs', 'false').lower() != 'true':
+            return queryset.filter(
+                status=TurfStatus.APPROVED,
+                is_active=True,
+                is_shutdown=False,
+            )
+
+        # Authenticated users: approved+active+public turfs for browsing,
+        # PLUS the user's own turfs at any status (needed for upload_image, update, retrieve on pending turfs).
         return queryset.filter(
-            Q(status=TurfStatus.APPROVED, is_active=True) | Q(owner=user)
+            Q(
+                status=TurfStatus.APPROVED,
+                is_active=True,
+                is_shutdown=False,
+            ) | Q(owner=user)
         )
     
     def get_serializer_class(self):
@@ -179,11 +199,24 @@ class TurfViewSet(viewsets.ModelViewSet):
         Aggregated stats across all of the owner's turfs.
         Returns can_manage=False for owners with no approved turfs yet.
         GET /api/turfs/turfs/owner_dashboard_stats/
+
+        PERF-2: Results cached in Redis for OWNER_DASHBOARD_CACHE_TTL seconds (default 300s).
+        Cache is invalidated by post_save/post_delete signals on Booking and Turf.
         """
         from django.db.models import Count, Sum, Avg, Q
 
         user = request.user
         today = timezone.localdate()
+
+        # ── Cache read ────────────────────────────────────────────────────
+        cache_key = f'owner_dashboard_stats_{user.id}'
+        cache_ttl = getattr(django_settings, 'OWNER_DASHBOARD_CACHE_TTL', 300)
+        try:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return Response(cached)
+        except Exception:
+            pass  # Redis unavailable — compute fresh
 
         owner_turfs = Turf.objects.filter(owner=user)
         total_turfs = owner_turfs.count()
@@ -195,12 +228,11 @@ class TurfViewSet(viewsets.ModelViewSet):
             rejected_count = owner_turfs.filter(status=TurfStatus.REJECTED).count()
             suspended_count = owner_turfs.filter(status=TurfStatus.SUSPENDED).count()
 
-            # Build per-turf status info so Flutter can show details
             turf_statuses = list(owner_turfs.values(
                 'id', 'name', 'status', 'rejection_reason', 'created_at',
             ))
 
-            return Response({
+            result = {
                 'success': True,
                 'can_manage': False,
                 'message': (
@@ -214,7 +246,13 @@ class TurfViewSet(viewsets.ModelViewSet):
                 'rejected_count': rejected_count,
                 'suspended_count': suspended_count,
                 'turf_statuses': turf_statuses,
-            })
+            }
+            # Cache the pending-only result briefly (30s) to avoid hammering DB on poll
+            try:
+                cache.set(cache_key, result, 30)
+            except Exception:
+                pass
+            return Response(result)
 
         if total_turfs == 0:
             return Response({
@@ -245,7 +283,7 @@ class TurfViewSet(viewsets.ModelViewSet):
             turf__owner=user,
         ).aggregate(avg_rating=Avg('rating'))
 
-        return Response({
+        result = {
             'success': True,
             'can_manage': True,
             'total_turfs': total_turfs,
@@ -273,7 +311,6 @@ class TurfViewSet(viewsets.ModelViewSet):
                         avg=Avg('rating')
                     )['avg'] or 0, 1),
                     'slots_count': turf.slot_masters.filter(is_active=True).count(),
-                    # Shutdown state
                     'is_shutdown': turf.is_shutdown,
                     'shutdown_start': str(turf.shutdown_start) if turf.shutdown_start else None,
                     'shutdown_end': str(turf.shutdown_end) if turf.shutdown_end else None,
@@ -281,7 +318,16 @@ class TurfViewSet(viewsets.ModelViewSet):
                 }
                 for turf in owner_turfs
             ],
-        })
+        }
+
+        # ── Cache write ───────────────────────────────────────────────────
+        try:
+            cache.set(cache_key, result, cache_ttl)
+        except Exception:
+            pass  # Redis unavailable — serve uncached result
+
+        return Response(result)
+
 
     # ─── OWNER: WEEKLY STATS ──────────────────────────────────────────────────
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated],
@@ -1311,3 +1357,108 @@ class TurfViewSet(viewsets.ModelViewSet):
                 'height': turf_image.crop_height,
             },
         }, status=status.HTTP_200_OK)
+
+    # ─── OWNER: BULK OFFER MANAGEMENT ─────────────────────────────────────────
+
+    @action(detail=True, methods=['post', 'delete'], url_path='bulk-offer')
+    def bulk_offer(self, request, pk=None):
+        """
+        Apply or remove an offer globally across all slots for a specific date.
+        POST: Apply offer. Body: {"date": "YYYY-MM-DD", "offer_type": "percentage|flat", "value": 20}
+        DELETE: Clear offers. Body/Query: {"date": "YYYY-MM-DD"}
+        """
+        turf = self.get_object()
+
+        if turf.owner != request.user:
+            return Response(
+                {'success': False, 'error': 'You can only manage offers for your own turf'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Handle both DELETE query params and POST body for 'date'
+        target_date_str = request.data.get('date') or request.query_params.get('date')
+        if not target_date_str:
+            return Response({'success': False, 'error': 'date is required (YYYY-MM-DD)'}, status=400)
+
+        try:
+            from datetime import datetime
+            target_date = datetime.strptime(target_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return Response({'success': False, 'error': 'Invalid date format. Use YYYY-MM-DD'}, status=400)
+
+        # Get all slot masters for this turf that match the weekday of the selected date
+        slots = SlotMaster.objects.filter(
+            turf=turf,
+            day_of_week=target_date.weekday(),
+            is_active=True
+        )
+        if not slots.exists():
+            return Response({'success': False, 'error': 'No active slots configured for this day'}, status=404)
+
+        if request.method == 'DELETE':
+            # Clear all offers for these slot masters on this date
+            deleted_count, _ = SlotOffer.objects.filter(
+                slot_master__in=slots,
+                valid_from__lte=target_date,
+                valid_until__gte=target_date,
+            ).delete()
+            return Response({
+                'success': True,
+                'message': f'Cleared {deleted_count} offer(s) for {target_date_str}',
+                'cleared_count': deleted_count
+            })
+
+        # POST - Apply Offer
+        offer_type_str = request.data.get('offer_type', 'percentage').lower()
+        from turfs.models import OfferType
+        
+        if offer_type_str == 'percentage':
+            offer_type = OfferType.PERCENTAGE
+        elif offer_type_str in ['flat', 'fixed']:
+            offer_type = OfferType.FLAT
+        else:
+            return Response({'success': False, 'error': 'Invalid offer type. Use percentage or flat'}, status=400)
+
+        try:
+            value = float(request.data.get('value', 0))
+            if value <= 0:
+                raise ValueError
+        except (ValueError, TypeError):
+            return Response({'success': False, 'error': 'A valid positive discount value is required'}, status=400)
+
+        applied_count = 0
+        skipped_count = 0
+        
+        # Prevent overwriting slots that ALREADY have an offer covering this date
+        existing_slot_ids_with_offers = set(SlotOffer.objects.filter(
+            slot_master__in=slots,
+            valid_from__lte=target_date,
+            valid_until__gte=target_date,
+            is_active=True
+        ).values_list('slot_master_id', flat=True))
+
+        offers_to_create = []
+        for slot in slots:
+            if slot.id in existing_slot_ids_with_offers:
+                skipped_count += 1
+                continue
+            
+            offers_to_create.append(SlotOffer(
+                slot_master=slot,
+                offer_type=offer_type,
+                value=value,
+                valid_from=target_date,
+                valid_until=target_date,
+                is_active=True
+            ))
+            applied_count += 1
+
+        if offers_to_create:
+            SlotOffer.objects.bulk_create(offers_to_create)
+
+        return Response({
+            'success': True,
+            'message': f'Global offer applied to {applied_count} slots. Skipped {skipped_count} slots with existing offers.',
+            'applied_count': applied_count,
+            'skipped_count': skipped_count
+        })

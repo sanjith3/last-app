@@ -5,6 +5,10 @@ Django settings for turfzone project.
 from pathlib import Path
 import os
 from datetime import timedelta
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -30,6 +34,7 @@ ALLOWED_HOSTS = ['*']
 
 # Application definition
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -49,10 +54,30 @@ INSTALLED_APPS = [
     'payments',
     'growth',
     'support',
+    'channels',
 ]
 
+ASGI_APPLICATION = 'turfzone.asgi.application'
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            "hosts": [('127.0.0.1', 6379)],
+        },
+    },
+}
+
+# Add fallback for development when Redis is not available
+if os.environ.get('REDIS_URL') is None:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        },
+    }
+
 MIDDLEWARE = [
-    'core.middleware.RequestDebugMiddleware',
+    'core.middleware.RequestLogMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
@@ -111,13 +136,22 @@ else:
     }
 
 # Cache — Redis for production locking & caching
-_REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/1')
-CACHES = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-        'LOCATION': _REDIS_URL,
+_REDIS_URL = os.environ.get('REDIS_URL', '')
+if _REDIS_URL:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': _REDIS_URL,
+        }
     }
-}
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'unique-snowflake',
+        }
+    }
+
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -163,6 +197,15 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
+    # BUG-04 FIX (additional layer): DRF rate limiting on top of django-axes
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '60/minute',   # Unauthenticated callers (login, register, OTP)
+        'user': '300/minute',  # Authenticated users (normal app usage)
+    },
 }
 
 # JWT Configuration
@@ -172,6 +215,9 @@ SIMPLE_JWT = {
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,
 }
+
+# PERF-2: Owner dashboard stats cache timeout (seconds). Set to 0 to disable.
+OWNER_DASHBOARD_CACHE_TTL = int(os.environ.get('OWNER_DASHBOARD_CACHE_TTL', 300))
 
 CORS_ALLOW_ALL_ORIGINS = True  # Dev only — restrict in production
 CORS_ALLOW_CREDENTIALS = True
@@ -227,8 +273,58 @@ RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET', '')
 RAZORPAY_WEBHOOK_SECRET = os.environ.get('RAZORPAY_WEBHOOK_SECRET', '')
 
 # ---------------------------------------------------------------------------
-# OTP Configuration (demo mode by default)
+# WhatsApp Cloud API (Meta) — OTP via WhatsApp
 # ---------------------------------------------------------------------------
-OTP_MODE = os.environ.get('OTP_MODE', 'demo')  # 'demo' or 'production'
-SMS_API_KEY = os.environ.get('SMS_API_KEY', '')
-SMS_SENDER_ID = os.environ.get('SMS_SENDER_ID', 'TRFSPT')
+WHATSAPP_TOKEN = os.environ.get('WHATSAPP_TOKEN', '')
+WHATSAPP_PHONE_NUMBER_ID = os.environ.get('WHATSAPP_PHONE_NUMBER_ID', '')
+WHATSAPP_TEMPLATE_NAME = os.environ.get('WHATSAPP_TEMPLATE_NAME', 'trufspot_otp_20260319122659')
+WHATSAPP_API_URL = os.environ.get('WHATSAPP_API_URL', 'https://graph.facebook.com/v21.0')
+WHATSAPP_VERIFY_TOKEN = os.environ.get('WHATSAPP_VERIFY_TOKEN', 'turfspot_verify_2026')
+WHATSAPP_OTP_RATE_LIMIT = int(os.environ.get('WHATSAPP_OTP_RATE_LIMIT', 3))  # per phone per hour
+
+
+# Tuning knobs (override in .env if needed)
+OTP_EXPIRY_MINUTES = int(os.environ.get('OTP_EXPIRY_MINUTES', 5))
+OTP_MAX_ATTEMPTS  = int(os.environ.get('OTP_MAX_ATTEMPTS', 5))
+OTP_RATE_LIMIT_PER_HOUR = int(os.environ.get('OTP_RATE_LIMIT_PER_HOUR', 5))
+
+# Ensure debug toolbar doesn't interfere
+DEBUG_PROPAGATE_EXCEPTIONS = True
+
+# Configure logging to console
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{levelname} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'simple',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'django.server': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}

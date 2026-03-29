@@ -217,7 +217,13 @@ def payment_webhook(request):
 
     client = _get_razorpay_client()
     if client is None or not webhook_secret:
-        return Response({'status': 'webhooks not configured'}, status=status.HTTP_200_OK)
+        # BUG-C FIX: Return 503 so Razorpay retries until keys are configured.
+        # Previously returned 200 which silently discarded all webhook events.
+        logger.warning("Razorpay webhook received but client/secret not configured — returning 503.")
+        return Response(
+            {'status': 'webhooks not configured'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
 
     # Verify webhook signature
     webhook_body = request.body.decode('utf-8') if isinstance(request.body, bytes) else request.body

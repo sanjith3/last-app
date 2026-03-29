@@ -764,6 +764,16 @@ class BookingViewSet(viewsets.ModelViewSet):
                 'error': 'Invalid date format. Use YYYY-MM-DD',
             }, status=status.HTTP_400_BAD_REQUEST)
 
+        # ─── Loyalty Tier Early Booking Window Check ───
+        days_in_advance = (booking_date - timezone.now().date()).days
+        max_early_days = request.user.get_tier_benefits.get('early_booking_days', 0)
+        # Note: If booking today or in max_early_days, it's valid.
+        if days_in_advance > max_early_days:
+            return Response({
+                'success': False,
+                'error': f'Your {request.user.loyalty_tier.capitalize()} tier allows booking up to {max_early_days} days in advance.',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         # Validate slots exist and belong to this turf (fetch ALL, check state)
         slots = SlotMaster.objects.filter(
             id__in=slot_ids,
@@ -807,6 +817,13 @@ class BookingViewSet(viewsets.ModelViewSet):
         # Compute full financial breakdown (GST calculated here only)
         financials = _compute_financial_breakdown(slots_pricing)
 
+        # ─── Loyalty Tier Cashback ───
+        loyalty_benefits = request.user.get_tier_benefits
+        loyalty_cashback = Decimal('0.00')
+        if loyalty_benefits['cashback'] > 0:
+            loyalty_cashback = _quantize(financials['subtotal'] * Decimal(str(loyalty_benefits['cashback'])) / Decimal('100'))
+            financials['total_payable'] = _quantize(financials['total_payable'] - loyalty_cashback)
+
         # ─── First Booking Discount (₹50 for new users) ───
         first_booking_discount = Decimal('0.00')
         if request.user.total_bookings == 0:
@@ -834,6 +851,10 @@ class BookingViewSet(viewsets.ModelViewSet):
             expires_at=timezone.now() + timedelta(minutes=5),
         )
 
+        financials['discount_total'] = _quantize(financials['discount_total'] + loyalty_cashback)
+        preview.discount_total = financials['discount_total']
+        preview.save()
+
         return Response({
             'success': True,
             'preview_token': str(preview.preview_token),
@@ -847,6 +868,7 @@ class BookingViewSet(viewsets.ModelViewSet):
             'platform_fee': str(financials['platform_fee']),
             'gst_on_platform_fee': str(financials['gst_on_platform_fee']),
             'first_booking_discount': str(first_booking_discount),
+            'loyalty_cashback': str(loyalty_cashback),
             'total_payable': str(financials['total_payable']),
             'price_breakdown': {
                 'subtotal': str(financials['subtotal']),
@@ -854,6 +876,7 @@ class BookingViewSet(viewsets.ModelViewSet):
                 'platform_fee': str(financials['platform_fee']),
                 'gst_on_platform_fee': str(financials['gst_on_platform_fee']),
                 'first_booking_discount': str(first_booking_discount),
+                'loyalty_cashback': str(loyalty_cashback),
                 'total_payable': str(financials['total_payable']),
             },
             'owner_settlement': {
@@ -946,7 +969,12 @@ class BookingViewSet(viewsets.ModelViewSet):
         slot_start_dt = timezone.make_aware(slot_start_dt)
         hours_until = (slot_start_dt - timezone.now()).total_seconds() / 3600
 
+        # -- Tier-based Free Cancellation --
+        free_cancel_hours = booking.user.get_tier_benefits.get('free_cancellation_hours', 0)
+
         if is_admin:
+            refund_percent = Decimal('100')
+        elif hours_until > free_cancel_hours and free_cancel_hours > 0:
             refund_percent = Decimal('100')
         elif hours_until > 24:
             refund_percent = Decimal('100')
@@ -1059,14 +1087,14 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         try:
             with transaction.atomic():
-                # 1. Lock user row — check credit balance
+                # 1. Lock user row — check free booking availability
                 User = get_user_model()
                 user = User.objects.select_for_update().get(pk=request.user.pk)
 
-                if user.available_credits < CREDITS_REQUIRED:
+                if not user.free_booking_available:
                     return Response({
                         'success': False,
-                        'error': f'Insufficient credits. Need {CREDITS_REQUIRED}, have {user.available_credits}',
+                        'error': 'You do not have a free booking available.',
                     }, status=status.HTTP_400_BAD_REQUEST)
 
                 # 2. Lock SlotMaster rows
@@ -1160,15 +1188,13 @@ class BookingViewSet(viewsets.ModelViewSet):
                     )
                     raise  # Re-raise to trigger atomic rollback
 
-                # 7. Deduct credits + increment bookings
-                user.used_credits += CREDITS_REQUIRED
-                user.total_bookings += 1
-                user.save(update_fields=['used_credits', 'total_bookings'])
+                # 7. Use free booking flag
+                user.free_booking_available = False
+                user.save(update_fields=['free_booking_available'])
 
                 logger.info(
                     f"Redeem booking #{booking.id}: Turf={turf.name} | "
-                    f"Date={booking_date} | Credits used={CREDITS_REQUIRED} | "
-                    f"Remaining={user.available_credits}"
+                    f"Date={booking_date} | Free booking used"
                 )
 
                 return Response({
@@ -1178,9 +1204,7 @@ class BookingViewSet(viewsets.ModelViewSet):
                     'booking_date': str(booking.booking_date),
                     'start_time': str(booking.start_time),
                     'end_time': str(booking.end_time),
-                    'credits_used': CREDITS_REQUIRED,
-                    'available_credits': user.available_credits,
-                    'total_credits': user.total_credits,
+                    'free_booking_used': True,
                 }, status=status.HTTP_201_CREATED)
 
         except IntegrityError:

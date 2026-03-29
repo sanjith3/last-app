@@ -119,6 +119,17 @@ class SupportViewSet(viewsets.ViewSet):
                 ticket.status = 'open'
                 ticket.save(update_fields=['status'])
 
+            try:
+                from truff_admin_panel.push_models import AdminNotification
+                AdminNotification.objects.create(
+                    title=f"New Message: {ticket.ticket_id}",
+                    body=f"{request.user.username}: {text[:50]}{'...' if len(text)>50 else ''}",
+                    notification_type='support_alert',
+                    target_type='all',  # You might want to target specific admins in the future
+                ).send()
+            except Exception as e:
+                logger.error(f"Failed to send admin push for ticket {ticket.ticket_id}: {e}")
+
             serializer = SupportMessageSerializer(msg, context={'request': request})
             return Response({'success': True, 'message': serializer.data}, status=status.HTTP_201_CREATED)
 

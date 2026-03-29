@@ -22,7 +22,7 @@ from django.utils.decorators import method_decorator
 from bookings.models import Booking, BookingStatus, Payment, CallRecord, CallStatus
 from finance.models import LedgerEntry, LedgerAccount, EntryType, OwnerSettlement
 from turfs.models import Turf, TurfStatus
-from users.models import TurfOwner
+from users.models import TurfOwner, OTPRequest
 
 from .mixins import TruffAdminRequiredMixin
 from .models import AdminAuditLog, PinChangeRequest, PinChangeRequestStatus, AdminConfig
@@ -320,8 +320,17 @@ class TurfDetailView(TruffAdminRequiredMixin, View):
         # TurfOwner profile (bank details, GST, agreement) — may not exist for older owners
         turf_owner_profile = getattr(turf.owner, 'turf_owner_profile', None)
 
+        # BUG-B FIX: Sanitise user-generated content before rendering in templates
+        from .utils import sanitize_text
+        owner = turf.owner
         return render(request, 'truff_admin/turf_detail.html', {
             'turf': turf,
+            'turf_name_safe': sanitize_text(turf.name),
+            'turf_description_safe': sanitize_text(turf.description),
+            'turf_address_safe': sanitize_text(turf.address),
+            'owner_name_safe': sanitize_text(
+                owner.get_full_name() or owner.username
+            ),
             'images': images,
             'sports': sports,
             'amenities': amenities,
@@ -330,6 +339,7 @@ class TurfDetailView(TruffAdminRequiredMixin, View):
             'future_bookings_count': future_bookings_count,
             'turf_owner_profile': turf_owner_profile,
         })
+
 
 
 class TurfActionView(TruffAdminRequiredMixin, View):
@@ -1951,6 +1961,20 @@ class SupportTicketDetailView(TruffAdminRequiredMixin, View):
                     request, 'support_reply', 'SupportTicket', ticket.pk,
                     {'ticket_id': ticket_id, 'message_len': len(text)},
                 )
+                
+                # Push notification to the user
+                if getattr(ticket.user, 'fcm_token', None):
+                    from truff_admin_panel.firebase_push import send_to_token
+                    try:
+                        send_to_token(
+                            ticket.user.fcm_token,
+                            "New reply on Support Ticket",
+                            f"Support: {text[:50]}{'...' if len(text)>50 else ''}",
+                            data={'route': 'support', 'ticket_id': ticket.ticket_id}
+                        )
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).error(f"Failed to push reply to user: {e}")
 
         elif action == 'assign':
             ticket.assigned_to = request.user
@@ -2407,3 +2431,21 @@ class ExportOfferReportView(TruffAdminRequiredMixin, View):
         response['Content-Disposition'] = 'attachment; filename="offer_report.csv"'
         return response
 
+
+class OTPTestView(TruffAdminRequiredMixin, View):
+    """Real-time OTP testing interface for admins."""
+    def get(self, request):
+        from users.otp_service import TwoFactorService
+        from users.models import OTPRequest
+        service = TwoFactorService()
+        balances = service.get_balance()
+        
+        # Get 10 most recent OTP logs
+        recent_otps = OTPRequest.objects.all().order_by('-created_at')[:10]
+        
+        context = {
+            'sms_balance': balances.get('sms', 0),
+            'recent_otps': recent_otps,
+            'active_tab': 'otp_test'
+        }
+        return render(request, 'truff_admin/otp_test.html', context)

@@ -21,7 +21,7 @@ class SupportMessageSerializer(serializers.ModelSerializer):
         return obj.sender.get_full_name() or obj.sender.username
 
     def get_is_admin_reply(self, obj):
-        return obj.sender.role in ('admin', 'staff')
+        return obj.sender != obj.ticket.user
 
     def get_attachment_url(self, obj):
         if not obj.attachment:

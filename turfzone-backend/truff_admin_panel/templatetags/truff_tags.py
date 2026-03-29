@@ -108,3 +108,11 @@ def format_audit_details(details):
 
     # Fallback: show all key-value pairs nicely
     return ', '.join(f"{k.replace('_', ' ').title()}: {v}" for k, v in details.items())
+
+
+@register.filter
+def cover_image_count(images):
+    """Returns the count of cover images in a queryset."""
+    if not images:
+        return 0
+    return sum(1 for img in images if getattr(img, 'is_cover', False))

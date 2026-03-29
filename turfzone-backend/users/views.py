@@ -6,12 +6,13 @@ import logging
 import uuid
 
 from rest_framework import status, viewsets
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
-from django.contrib.auth import get_user_model
+from django.contrib.auth import get_user_model, authenticate
+from django.contrib.auth.signals import user_logged_in, user_login_failed
 from django.db import transaction
 
 logger = logging.getLogger('users.registration')
@@ -224,55 +225,72 @@ class UserLoginViewSet(viewsets.ViewSet):
         """
         Login user with username and password.
         Link: POST /api/users/user-login/login/
+
+        BUG-04 FIX: Uses django.contrib.auth.authenticate() so django-axes
+        intercepts every failed attempt. After 5 failures the account is
+        locked for 15 minutes (configured in settings.AXES_*).
         """
         logger.debug("Login attempt for: %s", request.data.get('username'))
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
             try:
                 username_or_phone = serializer.validated_data['username']
-                # Try by username
-                user = User.objects.filter(username=username_or_phone).first()
-                if not user:
-                    # Try by phone_number
-                    user = User.objects.filter(phone_number=username_or_phone).first()
-                if not user:
-                    # Try by email
-                    user = User.objects.filter(email=username_or_phone).first()
+                password = serializer.validated_data['password']
 
-                if user:
-                    if user.check_password(serializer.validated_data['password']):
-                        refresh = RefreshToken.for_user(user)
-                        logger.debug("Login successful for: %s", user.username)
-                        return Response({
-                            'success': True,
-                            'message': 'Login successful',
-                            'user': CustomUserDetailSerializer(user).data,
-                            'tokens': {
-                                'refresh': str(refresh),
-                                'access': str(refresh.access_token),
-                            }
-                        }, status=status.HTTP_200_OK)
-                    else:
-                        logger.debug("Password check failed for: %s", user.username)
+                # Resolve canonical username for authenticate()
+                resolved_user = (
+                    User.objects.filter(username=username_or_phone).first()
+                    or User.objects.filter(phone_number=username_or_phone).first()
+                    or User.objects.filter(email=username_or_phone).first()
+                )
 
-                else:
-                    logger.debug("User not found: %s", username_or_phone)
+                # django.contrib.auth.authenticate() is what axes hooks into.
+                # Pass the resolved username so ModelBackend can look it up.
+                user = None
+                if resolved_user:
+                    user = authenticate(
+                        request=request,
+                        username=resolved_user.username,
+                        password=password,
+                    )
 
+                if user is not None:
+                    # Signal success to axes (resets failure counter)
+                    user_logged_in.send(
+                        sender=user.__class__, request=request, user=user
+                    )
+                    refresh = RefreshToken.for_user(user)
+                    logger.debug("Login successful for: %s", user.username)
+                    return Response({
+                        'success': True,
+                        'message': 'Login successful',
+                        'user': CustomUserDetailSerializer(user).data,
+                        'tokens': {
+                            'refresh': str(refresh),
+                            'access': str(refresh.access_token),
+                        }
+                    }, status=status.HTTP_200_OK)
 
+                # Failed — signal axes to record the attempt
+                user_login_failed.send(
+                    sender=User,
+                    request=request,
+                    credentials={'username': username_or_phone},
+                )
+                logger.debug("Failed login for: %s", username_or_phone)
                 return Response({
                     'success': False,
                     'error': 'Invalid credentials'
                 }, status=status.HTTP_401_UNAUTHORIZED)
+
             except Exception as e:
                 logger.error("Login error: %s", str(e), exc_info=True)
-
                 return Response({
                     'success': False,
                     'error': 'An error occurred during login'
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        logger.debug("Login serializer invalid: %s", serializer.errors)
 
+        logger.debug("Login serializer invalid: %s", serializer.errors)
         return Response({
             'success': False,
             'errors': serializer.errors
@@ -464,6 +482,59 @@ class UserProfileViewSet(viewsets.ViewSet):
         }, status=status.HTTP_400_BAD_REQUEST)
 
     # -----------------------------------------------------------------------
+    # Loyalty
+    # -----------------------------------------------------------------------
+
+    @action(detail=False, methods=['get'])
+    def loyalty(self, request):
+        """
+        Get current user loyalty status, tier progress, and benefits.
+        Link: GET /api/users/user-profile/loyalty/
+        """
+        user = request.user
+        
+        # Calculate progress to next tier
+        bookings = user.total_bookings
+        
+        # Tier logic matching models.py update_tier()
+        tiers_info = [
+            {'id': 'newbie', 'min': 0, 'max': 4},
+            {'id': 'bronze', 'min': 5, 'max': 14},
+            {'id': 'silver', 'min': 15, 'max': 29},
+            {'id': 'gold', 'min': 30, 'max': 49},
+            {'id': 'platinum', 'min': 50, 'max': float('inf')}
+        ]
+        
+        current_tier_idx = 0
+        for i, t in enumerate(tiers_info):
+            if t['id'] == user.loyalty_tier:
+                current_tier_idx = i
+                break
+                
+        next_tier = None
+        bookings_needed = 0
+        if current_tier_idx < len(tiers_info) - 1:
+            next_t = tiers_info[current_tier_idx + 1]
+            next_tier = next_t['id']
+            bookings_needed = next_t['min'] - bookings
+            
+        benefits = user.get_tier_benefits
+
+        return Response({
+            'success': True,
+            'loyalty': {
+                'current_tier': user.loyalty_tier,
+                'total_bookings': bookings,
+                'next_tier': next_tier,
+                'bookings_needed_for_next_tier': max(0, bookings_needed),
+                'benefits': benefits,
+                'free_booking_counter': user.free_booking_counter,
+                'free_booking_available': user.free_booking_available,
+                'free_booking_every': benefits.get('free_booking_every', 0)
+            }
+        }, status=status.HTTP_200_OK)
+
+    # -----------------------------------------------------------------------
     # Favorites
     # -----------------------------------------------------------------------
 
@@ -578,3 +649,30 @@ class TurfOwnerProfileViewSet(viewsets.ReadOnlyModelViewSet):
             from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied('You do not have permission to view this profile.')
         return obj
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def owner_approval_status(request):
+    """Check if owner has any approved turfs"""
+    user = request.user
+    
+    if getattr(user, 'role', '') != 'turf_owner':
+        return Response({'can_access': False, 'reason': 'Not a turf owner'})
+    
+    # Check if any turfs are approved
+    has_approved_turf = Turf.objects.filter(
+        owner=user, 
+        status=TurfStatus.APPROVED
+    ).exists()
+    
+    return Response({
+        'can_access': has_approved_turf,
+        'message': 'Your turf is pending approval' if not has_approved_turf else 'Access granted',
+        'pending_count': Turf.objects.filter(owner=user, status=TurfStatus.PENDING).count(),
+        'approved_count': Turf.objects.filter(owner=user, status=TurfStatus.APPROVED).count(),
+        'rejected_count': Turf.objects.filter(owner=user, status=TurfStatus.REJECTED).count(),
+        'suspended_count': Turf.objects.filter(owner=user, status=TurfStatus.SUSPENDED).count(),
+        'turf_statuses': list(Turf.objects.filter(owner=user).values(
+            'id', 'name', 'status', 'rejection_reason', 'created_at',
+        )),
+    })

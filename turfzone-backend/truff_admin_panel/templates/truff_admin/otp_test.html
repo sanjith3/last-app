@@ -1,0 +1,132 @@
+{% extends "truff_admin/base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <h2>🔐 OTP Service Real-Time Test</h2>
+
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Test OTP Delivery</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Phone Number</label>
+                        <input type="text" id="testPhone" class="form-control" value="9994463727"
+                            placeholder="Enter 10-digit number">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Delivery Method</label>
+                        <select id="testMethod" class="form-control">
+                            <option value="sms">📱 SMS</option>
+                        </select>
+                    </div>
+
+                    <button class="btn btn-primary" onclick="testOTPDelivery()">
+                        Send Test OTP
+                    </button>
+
+                    <div id="testResult" class="mt-3" style="display:none;"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0">Balance & Status</h5>
+                </div>
+                <div class="card-body">
+                    <div id="balanceInfo">
+                        <p>SMS Balance: <span id="smsBalance">{{ sms_balance }}</span></p>
+                        <p>API Status: <span id="apiStatus" class="badge bg-success">Active</span></p>
+                    </div>
+                    <button class="btn btn-info" onclick="refreshBalance()">
+                        Refresh Balance
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-warning">
+                    <h5 class="mb-0">Recent OTP Logs</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Phone</th>
+                                <th>Method</th>
+                                <th>Status</th>
+                                <th>Attempts</th>
+                            </tr>
+                        </thead>
+                        <tbody id="otpLogs">
+                            {% for log in recent_otps %}
+                            <tr>
+                                <td>{{ log.created_at|date:"H:i:s" }}</td>
+                                <td>{{ log.phone }}</td>
+                                <td>{{ log.method }}</td>
+                                <td>{% if log.is_verified %}✅ Verified{% else %}⏳ Pending{% endif %}</td>
+                                <td>{{ log.attempts }}/5</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    async function testOTPDelivery() {
+        const phone = document.getElementById('testPhone').value;
+        const method = document.getElementById('testMethod').value;
+        const resultDiv = document.getElementById('testResult');
+
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = '<div class="alert alert-info">Sending...</div>';
+
+        try {
+            const response = await fetch('/api/users/otp/test_delivery/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token }}'
+                },
+                body: JSON.stringify({ phone, method })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                resultDiv.innerHTML = `
+                <div class="alert alert-success">
+                    ✅ ${data.message}<br>
+                    <strong>Test Code:</strong> ${data.test_code} (valid for 5 min)
+                </div>
+            `;
+            } else {
+                resultDiv.innerHTML = `<div class="alert alert-danger">❌ ${data.error}</div>`;
+            }
+        } catch (e) {
+            resultDiv.innerHTML = `<div class="alert alert-danger">❌ Connection error</div>`;
+        }
+    }
+
+    async function refreshBalance() {
+        const response = await fetch('/api/users/otp/balance/');
+        const data = await response.json();
+
+        document.getElementById('smsBalance').textContent = data.sms;
+    }
+</script>
+{% endblock %}

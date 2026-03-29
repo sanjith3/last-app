@@ -49,6 +49,7 @@ urlpatterns = [
 
     # Settings
     path('settings/', views.SettingsView.as_view(), name='settings'),
+    path('otp-test/', views.OTPTestView.as_view(), name='otp_test'),
 
     # Promo Codes
     path('promo-codes/', views.PromoCodeListView.as_view(), name='promo_codes'),

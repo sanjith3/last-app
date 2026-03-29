@@ -53,6 +53,14 @@ class CustomUser(AbstractUser):
     # FCM push notification token — updated each app launch
     fcm_token = models.TextField(blank=True, null=True, help_text='Firebase Cloud Messaging device token')
 
+    # Loyalty tracking fields
+    loyalty_tier = models.CharField(max_length=20, default='newbie')
+    tier_updated_at = models.DateTimeField(auto_now=True)
+    free_booking_counter = models.IntegerField(default=0)
+    free_booking_available = models.BooleanField(default=False)
+    birthday_credited_year = models.IntegerField(null=True, blank=True)
+    date_of_birth = models.DateField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -60,6 +68,72 @@ class CustomUser(AbstractUser):
     def available_credits(self):
         """Derived — never stored in DB."""
         return self.total_credits - self.used_credits
+    
+    @property
+    def get_tier_benefits(self):
+        """Return tier-specific benefits"""
+        tiers = {
+            'newbie': {
+                'cashback': 0,
+                'early_booking_days': 0,
+                'free_cancellation_hours': 0,
+                'free_booking_every': 0,
+                'dedicated_support': False,
+                'birthday_bonus': 0,
+            },
+            'bronze': {
+                'cashback': 5,
+                'early_booking_days': 2,
+                'free_cancellation_hours': 6,
+                'free_booking_every': 0,
+                'dedicated_support': False,
+                'birthday_bonus': 50,
+            },
+            'silver': {
+                'cashback': 10,
+                'early_booking_days': 4,
+                'free_cancellation_hours': 12,
+                'free_booking_every': 0,
+                'dedicated_support': 'email',
+                'birthday_bonus': 100,
+            },
+            'gold': {
+                'cashback': 15,
+                'early_booking_days': 7,
+                'free_cancellation_hours': 24,
+                'free_booking_every': 10,
+                'dedicated_support': 'phone',
+                'birthday_bonus': 200,
+            },
+            'platinum': {
+                'cashback': 20,
+                'early_booking_days': 14,
+                'free_cancellation_hours': 48,
+                'free_booking_every': 5,
+                'dedicated_support': 'manager',
+                'birthday_bonus': 500,
+            },
+        }
+        return tiers.get(self.loyalty_tier, tiers['newbie'])
+    
+    def update_tier(self):
+        """Update tier based on total_bookings"""
+        if self.total_bookings >= 50:
+            new_tier = 'platinum'
+        elif self.total_bookings >= 30:
+            new_tier = 'gold'
+        elif self.total_bookings >= 15:
+            new_tier = 'silver'
+        elif self.total_bookings >= 5:
+            new_tier = 'bronze'
+        else:
+            new_tier = 'newbie'
+        
+        if self.loyalty_tier != new_tier:
+            self.loyalty_tier = new_tier
+            self.save()
+            return True
+        return False
     
     def __str__(self):
         return f"{self.username} ({self.get_role_display()})"
@@ -129,9 +203,18 @@ class OTPRequest(models.Model):
     """OTP verification requests for phone number validation."""
     PURPOSE_REGISTRATION = 'registration'
     PURPOSE_RESET = 'reset'
+    PURPOSE_LOGIN = 'login'
+    PURPOSE_PHONE_CHANGE = 'phone_change'
     PURPOSE_CHOICES = [
         (PURPOSE_REGISTRATION, 'Registration'),
         (PURPOSE_RESET, 'Password Reset'),
+        (PURPOSE_LOGIN, 'Login'),
+        (PURPOSE_PHONE_CHANGE, 'Phone Change'),
+    ]
+
+    METHOD_SMS = 'sms'
+    METHOD_CHOICES = [
+        (METHOD_SMS, 'SMS'),
     ]
 
     phone = models.CharField(max_length=15)
@@ -139,6 +222,12 @@ class OTPRequest(models.Model):
     purpose = models.CharField(
         max_length=20, choices=PURPOSE_CHOICES, default='', blank=True
     )
+    # Channel used for delivery (sms only)
+    method = models.CharField(
+        max_length=5, choices=METHOD_CHOICES, default=METHOD_SMS
+    )
+    # Number of failed verify attempts — locked out after OTP_MAX_ATTEMPTS
+    attempts = models.PositiveSmallIntegerField(default=0)
     expires_at = models.DateTimeField()
     is_verified = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)

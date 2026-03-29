@@ -115,9 +115,9 @@
         {% if sports %}
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
             {% for sport in sports %}
-            <span
-                style="background:rgba(34,197,94,0.15);color:#22c55e;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500;">{{
-                sport.name }}</span>
+            <span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;border-radius:20px;">
+                {{ sport.name }}
+            </span>
             {% endfor %}
         </div>
         {% else %}
@@ -130,9 +130,9 @@
         {% if amenities %}
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
             {% for amenity in amenities %}
-            <span
-                style="background:rgba(59,130,246,0.15);color:#3b82f6;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500;">{{
-                amenity.name }}</span>
+            <span class="badge" style="background:rgba(59,130,246,0.15);color:#3b82f6;border-radius:20px;">
+                {{ amenity.name }}
+            </span>
             {% endfor %}
         </div>
         {% else %}
@@ -242,16 +242,14 @@
     <div class="detail-grid">
         <div class="detail-item" style="grid-column:1/-1;">
             <label>Full Address</label>
-            <span>{{ turf.address|default:"—" }}{% if turf.city %}, {{ turf.city }}{% endif %}{% if turf.state %}, {{
-                turf.state }}{% endif %}{% if turf.postal_code %} — {{ turf.postal_code }}{% endif %}</span>
+            <span>{{ turf.address|default:"—" }}{% if turf.city %}, {{ turf.city }}{% endif %}{% if turf.state %}, {{ turf.state }}{% endif %}{% if turf.postal_code %} — {{ turf.postal_code }}{% endif %}</span>
         </div>
         <div class="detail-item"><label>City</label><span>{{ turf.city|default:"—" }}</span></div>
         <div class="detail-item"><label>State</label><span>{{ turf.state|default:"—" }}</span></div>
         <div class="detail-item"><label>Postal Code</label><span>{{ turf.postal_code|default:"—" }}</span></div>
         <div class="detail-item"><label>Latitude</label><span style="font-family:monospace;">{{ turf.latitude }}</span>
         </div>
-        <div class="detail-item"><label>Longitude</label><span style="font-family:monospace;">{{ turf.longitude
-                }}</span></div>
+        <div class="detail-item"><label>Longitude</label><span style="font-family:monospace;">{{ turf.longitude }}</span></div>
         {% if turf.google_maps_share_link %}
         <div class="detail-item" style="grid-column:1/-1;">
             <label>Google Maps</label>
@@ -279,7 +277,7 @@
         <span>📸 Photos ({{ turf.images.count }})</span>
         {% if turf.images.count > 0 %}
         <span style="font-size:13px;font-weight:400;color:var(--text-muted);">
-            {{ turf.images.filter(is_cover=True).count|default:"0" }} cover set
+            {{ turf.images.all|cover_image_count }} cover set
         </span>
         {% endif %}
     </div>

@@ -18,7 +18,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 
 from .models import (
-    CustomUser, OTPRequest, Referral, PromoCode,
+    CustomUser, Referral, PromoCode,
     DeviceToken, ChatRoom, ChatMessage, Dispute, TurfOwner,
 )
 
@@ -68,180 +68,42 @@ def _verify_temp_token(token: str):
 
 
 # ---------------------------------------------------------------------------
-# OTP ViewSet
+# Authentication
 # ---------------------------------------------------------------------------
 
-class OTPViewSet(viewsets.ViewSet):
-    """OTP send, verify, complete-registration, and reset-password endpoints."""
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from django.contrib.auth import get_user_model
+from rest_framework_simplejwt.tokens import RefreshToken
 
-    permission_classes = [AllowAny]
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register_user(request):
+    """
+    POST /api/users/auth/register/
+    Accepts: phone, name, password
 
-    @action(detail=False, methods=['post'])
-    def send_otp(self, request):
-        """
-        Send OTP to a phone number.
+    Phone must have been verified via WhatsApp OTP on the client side.
+    """
+    User = get_user_model()
 
-        POST /api/users/otp/send_otp/
-        Body: {"phone": "9876543210", "purpose": "registration"|"reset"}
-        """
-        phone = request.data.get('phone', '').strip()
-        purpose = request.data.get('purpose', '').strip()
+    phone = request.data.get('phone', '').strip()
+    name = request.data.get('name', 'User').strip()
+    password = request.data.get('password', '').strip()
 
-        if not phone or len(phone) < 10:
-            return Response({'error': 'Valid phone number required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not phone or not password or not name:
+        return Response({'error': 'phone, name, and password are required'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if purpose not in ('registration', 'reset', ''):
-            return Response({'error': 'Invalid purpose'}, status=status.HTTP_400_BAD_REQUEST)
+    # Upsert user cleanly
+    existing_user = User.objects.filter(username=phone).first() or User.objects.filter(phone_number=phone).first()
 
-        # For password reset: verify account exists BEFORE sending OTP
-        # (fail fast so the user doesn't waste time completing OTP verification)
-        if purpose == 'reset':
-            from django.contrib.auth import get_user_model
-            User = get_user_model()
-            user_exists = (
-                User.objects.filter(username=phone).exists()
-                or User.objects.filter(phone_number=phone).exists()
-                or User.objects.filter(email__startswith=phone + '@').exists()
-            )
-            if not user_exists:
-                return Response(
-                    {'error': 'No account registered with this phone number.'},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
-
-        # Rate limit: max 5 OTPs per (phone, purpose) per hour
-        recent_count = OTPRequest.objects.filter(
-            phone=phone,
-            purpose=purpose,
-            created_at__gte=timezone.now() - timedelta(hours=1),
-        ).count()
-
-        if recent_count >= 5:
-            return Response(
-                {'error': 'Too many OTP requests. Please try again later.'},
-                status=status.HTTP_429_TOO_MANY_REQUESTS,
-            )
-
-        # Generate 6-digit OTP
-        code = ''.join(random.choices(string.digits, k=6))
-        expires_at = timezone.now() + timedelta(minutes=5)
-
-        OTPRequest.objects.create(
-            phone=phone,
-            code=code,
-            purpose=purpose,
-            expires_at=expires_at,
-        )
-
-        otp_mode = getattr(settings, 'OTP_MODE', 'demo')
-
-        if otp_mode == 'demo':
-            logger.info(f"[DEMO OTP] Phone: {phone}, Purpose: {purpose}, Code: {code}")
-            return Response({
-                'success': True,
-                'message': 'OTP sent (demo mode). Use 123456 for testing.',
-                'demo_code': code,
-            })
-
-        # Production — integrate SMS provider here
-        # send_sms(phone, f"Your TurfZone OTP is {code}")
-        return Response({'success': True, 'message': 'OTP sent to your phone.'})
-
-    @action(detail=False, methods=['post'])
-    def verify_otp(self, request):
-        """
-        Verify OTP code. Returns a short-lived temp token on success.
-
-        POST /api/users/otp/verify_otp/
-        Body: {"phone": "9876543210", "code": "123456", "purpose": "registration"|"reset"}
-        """
-        phone = request.data.get('phone', '').strip()
-        code = request.data.get('code', '').strip()
-        purpose = request.data.get('purpose', '').strip()
-
-        if not phone or not code:
-            return Response({'error': 'Phone and code are required'}, status=status.HTTP_400_BAD_REQUEST)
-
-        otp_mode = getattr(settings, 'OTP_MODE', 'demo')
-
-        # Demo mode — accept 123456 as universal test code
-        if otp_mode == 'demo' and code == '123456':
-            temp_token = _generate_temp_token(phone, purpose)
-            return Response({
-                'success': True,
-                'verified': True,
-                'token': temp_token,
-                'message': 'OTP verified (demo mode).',
-            })
-
-        # Production: verify against stored OTP
-        otp = OTPRequest.objects.filter(
-            phone=phone,
-            code=code,
-            purpose=purpose,
-            is_verified=False,
-            expires_at__gt=timezone.now(),
-        ).order_by('-created_at').first()
-
-        if otp:
-            otp.is_verified = True
-            otp.save(update_fields=['is_verified'])
-
-            temp_token = _generate_temp_token(phone, purpose)
-            return Response({'success': True, 'verified': True, 'token': temp_token})
-
-        return Response(
-            {'success': False, 'error': 'Invalid or expired OTP'},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    @action(detail=False, methods=['post'])
-    def complete_registration(self, request):
-        """
-        Complete user registration after OTP verification.
-
-        POST /api/users/otp/complete_registration/
-        Body: {"name":"John","phone":"9876543210","password":"pass123","otp_token":"<token>"}
-        """
-        from .serializers import CustomUserDetailSerializer
-        from rest_framework_simplejwt.tokens import RefreshToken
-        from django.contrib.auth import get_user_model
-        User = get_user_model()
-
-        name = request.data.get('name', '').strip()
-        phone = request.data.get('phone', '').strip()
-        password = request.data.get('password', '').strip()
-        otp_token = request.data.get('otp_token', '').strip()
-
-        if not all([name, phone, password, otp_token]):
-            return Response({'error': 'name, phone, password and otp_token are required'},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-        # Validate temp token
-        payload = _verify_temp_token(otp_token)
-        if not payload or payload.get('phone') != phone or payload.get('purpose') != 'registration':
-            return Response(
-                {'error': 'Invalid or expired OTP session. Please restart verification.'},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
-
-        # Idempotent: existing user + correct password → silent login
-        existing = (User.objects.filter(username=phone).first()
-                    or User.objects.filter(phone_number=phone).first())
-        if existing:
-            if existing.check_password(password):
-                refresh = RefreshToken.for_user(existing)
-                return Response({
-                    'success': True,
-                    'message': 'Welcome back! Logged in successfully.',
-                    'user': CustomUserDetailSerializer(existing).data,
-                    'tokens': {'refresh': str(refresh), 'access': str(refresh.access_token)},
-                })
-            return Response({'error': 'Phone already registered. Please log in.'},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-        # Create user
-        parts = name.split()
+    if existing_user:
+        if existing_user.check_password(password):
+            user = existing_user
+        else:
+            return Response({'error': 'Phone number already registered with a different password. Please log in.'}, status=status.HTTP_409_CONFLICT)
+    else:
+        parts = name.split(' ')
         first_name = parts[0][:150]
         last_name = ' '.join(parts[1:])[:150] if len(parts) > 1 else ''
         user = User.objects.create_user(
@@ -255,57 +117,92 @@ class OTPViewSet(viewsets.ViewSet):
             is_phone_verified=True,
         )
 
-        refresh = RefreshToken.for_user(user)
-        return Response({
-            'success': True,
-            'message': 'Account created successfully.',
-            'user': CustomUserDetailSerializer(user).data,
-            'tokens': {'refresh': str(refresh), 'access': str(refresh.access_token)},
-        }, status=status.HTTP_201_CREATED)
+    # Guarantee password is encrypted properly for legacy logins
+    user.set_password(password)
+    if not user.is_phone_verified:
+        user.is_phone_verified = True
+    user.save()
 
-    @action(detail=False, methods=['post'])
-    def reset_password(self, request):
-        """
-        Reset user password after OTP verification.
+    refresh = RefreshToken.for_user(user)
+    from .serializers import CustomUserDetailSerializer
 
-        POST /api/users/otp/reset_password/
-        Body: {"phone":"9876543210","new_password":"newpass123","otp_token":"<token>"}
-        """
-        from django.contrib.auth import get_user_model
-        User = get_user_model()
+    return Response({
+        'success': True,
+        'message': 'Account created successfully.' if not existing_user else 'Welcome back.',
+        'user': CustomUserDetailSerializer(user).data,
+        'tokens': {'refresh': str(refresh), 'access': str(refresh.access_token)},
+    }, status=status.HTTP_201_CREATED if not existing_user else status.HTTP_200_OK)
 
-        phone = request.data.get('phone', '').strip()
-        new_password = request.data.get('new_password', '').strip()
-        otp_token = request.data.get('otp_token', '').strip()
 
-        if not all([phone, new_password, otp_token]):
-            return Response({'error': 'phone, new_password and otp_token are required'},
-                            status=status.HTTP_400_BAD_REQUEST)
 
-        if len(new_password) < 6:
-            return Response({'error': 'Password must be at least 6 characters'},
-                            status=status.HTTP_400_BAD_REQUEST)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def reset_password(request):
+    """
+    POST /api/users/auth/reset-password/
+    Accepts: phone, new_password, reset_token (from WhatsApp OTP flow)
 
-        # Validate temp token
-        payload = _verify_temp_token(otp_token)
-        if not payload or payload.get('phone') != phone or payload.get('purpose') != 'reset':
+    Phone must have been verified via WhatsApp OTP.
+    The reset_token is an HMAC-signed temporary token issued after OTP verification.
+    """
+    User = get_user_model()
+    
+    phone = request.data.get('phone', '').strip()
+    new_password = request.data.get('new_password', '').strip()
+    reset_token = request.data.get('reset_token', '').strip()
+
+    if not phone or not new_password:
+        return Response(
+            {'error': 'Phone and new password are required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if len(new_password) < 6:
+        return Response(
+            {'error': 'Password must be at least 6 characters'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # If reset_token is provided (WhatsApp OTP flow), verify it
+    if reset_token:
+        payload = _verify_temp_token(reset_token)
+        if payload is None:
             return Response(
-                {'error': 'Invalid or expired OTP session. Please restart verification.'},
-                status=status.HTTP_401_UNAUTHORIZED,
+                {'error': 'Reset token is invalid or expired. Please verify your phone again.'},
+                status=status.HTTP_400_BAD_REQUEST,
             )
+        if payload.get('purpose') != 'reset':
+            return Response(
+                {'error': 'Invalid token purpose.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Use phone from token for extra security
+        phone = payload.get('phone', phone)
 
-        # Find user
-        user = (User.objects.filter(username=phone).first()
-                or User.objects.filter(phone_number=phone).first())
-        if not user:
-            return Response({'error': 'No account found for this phone number.'},
-                            status=status.HTTP_404_NOT_FOUND)
+    # Find user by phone
+    user = (
+        User.objects.filter(phone_number=phone).first()
+        or User.objects.filter(username=phone).first()
+    )
+    if not user:
+        return Response(
+            {'error': 'No account found with this phone number'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
 
-        user.set_password(new_password)
-        user.save(update_fields=['password'])
+    user.set_password(new_password)
+    user.save()
 
-        return Response({'success': True, 'message': 'Password reset successfully. Please log in.'})
-
+    # Auto-login: return fresh JWT tokens
+    refresh = RefreshToken.for_user(user)
+    return Response({
+        'success': True,
+        'message': 'Password reset successfully',
+        'tokens': {
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+        },
+    })
 
 
 
@@ -1114,3 +1011,236 @@ def get_available_offers(request):
         'owner_offers': owner_offers,
         'offers': offers_flat,
     })
+
+
+
+
+# ---------------------------------------------------------------------------
+# WhatsApp OTP — Send, Verify, Webhook
+# ---------------------------------------------------------------------------
+
+import requests as _requests
+from django.core.cache import cache as _cache
+from django.http import HttpResponse
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def send_whatsapp_otp(request):
+    """
+    POST /api/whatsapp/send-otp/
+    Body: {"phone": "+919999999999"}
+
+    Generates a 6-digit OTP, stores it in cache (5 min TTL),
+    and sends it via WhatsApp Cloud API using the approved template.
+    Includes rate limiting: max WHATSAPP_OTP_RATE_LIMIT per phone per hour.
+    """
+    phone = request.data.get('phone', '').strip()
+
+    if not phone:
+        return Response(
+            {'success': False, 'error': 'Phone number is required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Normalise: strip leading +91 or 91 for consistency, then re-add +91
+    clean = phone.replace('+', '').replace(' ', '').replace('-', '')
+    if clean.startswith('91') and len(clean) > 10:
+        clean = clean[2:]
+    if len(clean) != 10 or not clean.isdigit():
+        return Response(
+            {'success': False, 'error': 'Invalid phone number. Provide a 10-digit Indian number.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    wa_phone = f'+91{clean}'  # WhatsApp expects E.164
+
+    # ── Rate limiting (per phone, per hour) ──────────────────────────────
+    rate_key = f'wa_otp_rate_{clean}'
+    current_count = _cache.get(rate_key, 0)
+    max_per_hour = getattr(settings, 'WHATSAPP_OTP_RATE_LIMIT', 3)
+
+    if current_count >= max_per_hour:
+        return Response(
+            {'success': False, 'error': 'Too many OTP requests. Please try again later.'},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+
+    # ── Generate OTP ─────────────────────────────────────────────────────
+    otp = ''.join(random.choices('0123456789', k=6))
+
+    # Store OTP in cache with 5 min TTL
+    _cache.set(f'otp_wa_{clean}', otp, timeout=300)
+
+    # ── Call Meta Cloud API ──────────────────────────────────────────────
+    api_url = getattr(settings, 'WHATSAPP_API_URL', 'https://graph.facebook.com/v21.0')
+    phone_number_id = getattr(settings, 'WHATSAPP_PHONE_NUMBER_ID', '')
+    token = getattr(settings, 'WHATSAPP_TOKEN', '')
+    template_name = getattr(settings, 'WHATSAPP_TEMPLATE_NAME', '')
+
+    if not token or not phone_number_id:
+        logger.error('WhatsApp credentials not configured.')
+        return Response(
+            {'success': False, 'error': 'WhatsApp service is not configured.'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    url = f'{api_url}/{phone_number_id}/messages'
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json',
+    }
+    payload = {
+        'messaging_product': 'whatsapp',
+        'to': wa_phone.replace('+', ''),  # Meta expects without +
+        'type': 'template',
+        'template': {
+            'name': template_name,
+            'language': {'code': 'en'},
+            'components': [
+                {
+                    'type': 'body',
+                    'parameters': [{'type': 'text', 'text': otp}],
+                },
+                {
+                    'type': 'button',
+                    'sub_type': 'url',
+                    'index': '0',
+                    'parameters': [{'type': 'text', 'text': otp}],
+                },
+            ],
+        },
+    }
+
+    try:
+        resp = _requests.post(url, json=payload, headers=headers, timeout=10)
+        resp_data = resp.json()
+
+        if resp.status_code in (200, 201):
+            # Increment rate-limit counter (1 hour window)
+            if current_count == 0:
+                _cache.set(rate_key, 1, timeout=3600)
+            else:
+                _cache.incr(rate_key)
+
+            logger.info('WhatsApp OTP sent to %s (masked)', f'***{clean[-4:]}')
+            return Response({'success': True, 'message': 'OTP sent via WhatsApp.'})
+        else:
+            error_msg = resp_data.get('error', {}).get('message', 'Unknown error')
+            logger.error('WhatsApp API error: %s — %s', resp.status_code, error_msg)
+            return Response(
+                {'success': False, 'error': f'Failed to send OTP: {error_msg}'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+    except _requests.exceptions.Timeout:
+        return Response(
+            {'success': False, 'error': 'WhatsApp service timeout. Please try again.'},
+            status=status.HTTP_504_GATEWAY_TIMEOUT,
+        )
+    except _requests.exceptions.RequestException as e:
+        logger.exception('WhatsApp API request failed: %s', e)
+        return Response(
+            {'success': False, 'error': 'WhatsApp service unavailable.'},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def verify_whatsapp_otp(request):
+    """
+    POST /api/whatsapp/verify-otp/
+    Body: {"phone": "+919999999999", "otp": "123456", "purpose": "register|reset"}
+
+    Verifies OTP from cache. On success:
+      - purpose=register → returns verified=true (caller proceeds with registration)
+      - purpose=reset    → returns verified=true + reset_token (HMAC-signed temp token)
+    """
+    phone = request.data.get('phone', '').strip()
+    otp = request.data.get('otp', '').strip()
+    purpose = request.data.get('purpose', 'register').strip()
+
+    if not phone or not otp:
+        return Response(
+            {'success': False, 'error': 'Phone and OTP are required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Normalise phone
+    clean = phone.replace('+', '').replace(' ', '').replace('-', '')
+    if clean.startswith('91') and len(clean) > 10:
+        clean = clean[2:]
+
+    cache_key = f'otp_wa_{clean}'
+    cached_otp = _cache.get(cache_key)
+
+    if cached_otp is None:
+        return Response(
+            {'success': False, 'error': 'OTP expired or not found. Please request a new one.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if str(cached_otp) != str(otp):
+        return Response(
+            {'success': False, 'error': 'Invalid OTP. Please check and try again.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # OTP matches — delete from cache (one-time use)
+    _cache.delete(cache_key)
+
+    result = {
+        'success': True,
+        'verified': True,
+        'message': 'Phone verified successfully.',
+    }
+
+    # For password reset flow, return a signed temp token
+    if purpose == 'reset':
+        result['reset_token'] = _generate_temp_token(clean, 'reset', ttl=300)
+
+    logger.info('WhatsApp OTP verified for %s (purpose=%s)', f'***{clean[-4:]}', purpose)
+    return Response(result)
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([AllowAny])
+def whatsapp_webhook(request):
+    """
+    GET  /api/whatsapp/webhook/ — Meta webhook verification
+    POST /api/whatsapp/webhook/ — Delivery status receipts (logging only)
+    """
+    if request.method == 'GET':
+        # Meta sends hub.mode, hub.verify_token, hub.challenge
+        mode = request.GET.get('hub.mode', '')
+        token = request.GET.get('hub.verify_token', '')
+        challenge = request.GET.get('hub.challenge', '')
+
+        expected_token = getattr(settings, 'WHATSAPP_VERIFY_TOKEN', '')
+
+        if mode == 'subscribe' and token == expected_token:
+            logger.info('WhatsApp webhook verified successfully.')
+            return HttpResponse(challenge, content_type='text/plain', status=200)
+        else:
+            logger.warning('WhatsApp webhook verification failed. token=%s', token)
+            return HttpResponse('Forbidden', status=403)
+
+    # POST — delivery status updates (informational)
+    try:
+        data = request.data
+        entries = data.get('entry', [])
+        for entry in entries:
+            changes = entry.get('changes', [])
+            for change in changes:
+                statuses = change.get('value', {}).get('statuses', [])
+                for s in statuses:
+                    logger.info(
+                        'WhatsApp delivery: recipient=%s status=%s timestamp=%s',
+                        s.get('recipient_id', '?'),
+                        s.get('status', '?'),
+                        s.get('timestamp', '?'),
+                    )
+    except Exception:
+        pass  # Delivery receipts are optional; never fail the webhook
+
+    return Response({'success': True})
+

@@ -35,7 +35,7 @@
             <span style="color:#8b8fa3;font-size:12px;">User</span><br>
             <strong>{{ ticket.user.get_full_name|default:ticket.user.username }}</strong>
             <span style="color:#8b8fa3;font-size:12px;margin-left:8px;">{{
-                ticket.user.phone_number|default:ticket.user.email }}</span>
+                ticket.user.phone_number|default:ticket.user.email|default:"—" }}</span>
         </div>
         <div>
             <span style="color:#8b8fa3;font-size:12px;">Subject</span><br>

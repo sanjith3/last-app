@@ -258,8 +258,20 @@ def confirm_booking(
             user_locked.total_credits += 10
             if not user_locked.first_booking_completed:
                 user_locked.first_booking_completed = True
+                
+            # Free Booking Counter Logic
+            tier_benefits = user_locked.get_tier_benefits
+            free_every = tier_benefits.get('free_booking_every', 0)
+            
+            if free_every > 0:
+                user_locked.free_booking_counter += 1
+                if user_locked.free_booking_counter >= free_every:
+                    user_locked.free_booking_counter = 0
+                    user_locked.free_booking_available = True
+                    
             user_locked.save(update_fields=[
                 'total_bookings', 'total_credits', 'first_booking_completed',
+                'free_booking_counter', 'free_booking_available'
             ])
 
             # ── 15. Record coupon usage ──
