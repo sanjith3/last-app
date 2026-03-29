@@ -6,6 +6,7 @@ from pathlib import Path
 import os
 from datetime import timedelta
 from dotenv import load_dotenv
+import dj_database_url
 
 # Load environment variables from .env file
 load_dotenv()
@@ -25,12 +26,12 @@ if not FIREBASE_SERVICE_ACCOUNT_PATH.exists():
 # ───────────────────────────────────────────────────────────────────────────
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-turfzone-dev-key-change-in-production'
+SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-turfzone-dev-key-change-in-production')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '*').split(',')
 
 # Application definition
 INSTALLED_APPS = [
@@ -79,6 +80,7 @@ if os.environ.get('REDIS_URL') is None:
 MIDDLEWARE = [
     'core.middleware.RequestLogMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -113,27 +115,14 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'turfzone.wsgi.application'
 
-# Database — PostgreSQL for production, SQLite fallback for quick dev
-_DB_ENGINE = os.environ.get('DB_ENGINE', 'sqlite3')
-
-if _DB_ENGINE == 'postgresql':
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.postgresql',
-            'NAME': os.environ.get('DB_NAME', 'turfzone'),
-            'USER': os.environ.get('DB_USER', 'postgres'),
-            'PASSWORD': os.environ.get('DB_PASSWORD', 'postgres'),
-            'HOST': os.environ.get('DB_HOST', 'localhost'),
-            'PORT': os.environ.get('DB_PORT', '5432'),
-        }
-    }
-else:
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
+# Database — Render provides DATABASE_URL for PostgreSQL;
+# falls back to SQLite for local development.
+DATABASES = {
+    'default': dj_database_url.config(
+        default=f'sqlite:///{BASE_DIR / "db.sqlite3"}',
+        conn_max_age=600,
+    )
+}
 
 # Cache — Redis for production locking & caching
 _REDIS_URL = os.environ.get('REDIS_URL', '')
@@ -181,6 +170,7 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [
     BASE_DIR.parent.parent / 'trufspot-landing',  # Landing page CSS/JS/assets
 ]
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
@@ -221,6 +211,15 @@ OWNER_DASHBOARD_CACHE_TTL = int(os.environ.get('OWNER_DASHBOARD_CACHE_TTL', 300)
 
 CORS_ALLOW_ALL_ORIGINS = True  # Dev only — restrict in production
 CORS_ALLOW_CREDENTIALS = True
+
+# ---------------------------------------------------------------------------
+# Production Security (only when DEBUG is off)
+# ---------------------------------------------------------------------------
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', 'True') == 'True'
 
 # Custom User Model
 AUTH_USER_MODEL = 'users.CustomUser'
