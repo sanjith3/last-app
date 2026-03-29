@@ -23,10 +23,8 @@ def health_check(request):
 _landing_dir = Path(settings.BASE_DIR).parent.parent / 'trufspot-landing'
 
 urlpatterns = [
-    # Landing page at root (or health check fallback on cloud deployments)
-    path('', TemplateView.as_view(template_name='index.html'), name='landing')
-    if (_landing_dir / 'index.html').exists()
-    else path('', health_check, name='landing'),
+    # Landing page (bundled in templates/index.html)
+    path('', TemplateView.as_view(template_name='index.html'), name='landing'),
 
     path('admin/', admin.site.urls),
     path('api/health/', health_check),

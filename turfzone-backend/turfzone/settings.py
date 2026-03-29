@@ -170,9 +170,9 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [
-    d for d in [
-        _LANDING_DIR,  # Landing page CSS/JS/assets (if present)
-    ] if d.exists()
+    BASE_DIR / 'static',  # Landing page CSS/JS/assets (bundled in repo)
+] + [
+    d for d in [_LANDING_DIR] if d.exists()  # Also check external landing dir
 ]
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 MEDIA_URL = '/media/'
