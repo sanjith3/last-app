@@ -821,7 +821,7 @@ class UserDetailView(TruffAdminRequiredMixin, View):
         elif action == 'delete':
             # Soft delete — deactivate and anonymize
             user_obj.is_active = False
-            user_obj.email = f'deleted_{user_obj.pk}@deleted.trufspot.com'
+            user_obj.email = f'deleted_{user_obj.pk}@deleted.turfspotx.com'
             user_obj.phone_number = ''
             user_obj.first_name = 'Deleted'
             user_obj.last_name = 'User'
