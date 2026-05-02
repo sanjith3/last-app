@@ -1,5 +1,5 @@
 """
-Django settings for turfzone project.
+Django settings for turfspotx project.
 """
 
 from pathlib import Path
@@ -26,7 +26,7 @@ if not FIREBASE_SERVICE_ACCOUNT_PATH.exists():
 # ───────────────────────────────────────────────────────────────────────────
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-turfzone-dev-key-change-in-production')
+SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-turfspotx-dev-key-change-in-production')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
@@ -58,7 +58,7 @@ INSTALLED_APPS = [
     'channels',
 ]
 
-ASGI_APPLICATION = 'turfzone.asgi.application'
+ASGI_APPLICATION = 'turfspotx.asgi.application'
 
 CHANNEL_LAYERS = {
     'default': {
@@ -91,7 +91,7 @@ MIDDLEWARE = [
     'axes.middleware.AxesMiddleware',  # BUG-04: brute-force protection (must be last)
 ]
 
-ROOT_URLCONF = 'turfzone.urls'
+ROOT_URLCONF = 'turfspotx.urls'
 
 # Landing page directory (may not exist on cloud deployments)
 _LANDING_DIR = BASE_DIR.parent.parent / 'trufspot-landing'
@@ -115,7 +115,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'turfzone.wsgi.application'
+WSGI_APPLICATION = 'turfspotx.wsgi.application'
 
 # Database — Render provides DATABASE_URL for PostgreSQL;
 # falls back to SQLite for local development.

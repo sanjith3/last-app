@@ -23,7 +23,7 @@ TEMPLATES = {
             'Great news! Your turf "{name}" has been approved by {admin_name} '
             'on {datetime} and is now visible to the public.\n\n'
             'You can now start receiving bookings.\n\n'
-            '— TurfZone Team'
+            '— TurfSpotX Team'
         ),
     },
     'reject': {
@@ -33,7 +33,7 @@ TEMPLATES = {
             'Your turf "{name}" was rejected by {admin_name} on {datetime}.\n\n'
             'Reason: {reason}\n\n'
             'You can edit your turf and resubmit it for review.\n\n'
-            '— TurfZone Team'
+            '— TurfSpotX Team'
         ),
     },
     'suspend': {
@@ -44,7 +44,7 @@ TEMPLATES = {
             'Reason: {reason}\n\n'
             'New bookings are blocked until the suspension is lifted. '
             'If you believe this is an error, please contact support.\n\n'
-            '— TurfZone Team'
+            '— TurfSpotX Team'
         ),
     },
     'reactivate': {
@@ -53,7 +53,7 @@ TEMPLATES = {
             'Hi {owner_name},\n\n'
             'Your turf "{name}" has been reactivated by {admin_name} '
             'on {datetime} and is now visible to the public again.\n\n'
-            '— TurfZone Team'
+            '— TurfSpotX Team'
         ),
     },
 }
@@ -96,7 +96,7 @@ def send_turf_status_email(turf, action, admin_name, reason=None):
         return False
 
     try:
-        from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@turfzone.in')
+        from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@turfspotx.in')
         send_mail(subject, body, from_email, [owner_email], fail_silently=False)
         logger.info(f"[EMAIL] Sent {action} notification to {owner_email} for turf '{turf.name}'")
         return True

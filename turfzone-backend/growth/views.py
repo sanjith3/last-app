@@ -54,7 +54,7 @@ class ReferralViewSet(viewsets.ViewSet):
             user.referral_code = secrets.token_hex(3).upper()
             user.save(update_fields=['referral_code'])
 
-        link = f"https://turfzone.app/join?ref={user.referral_code}"
+        link = f"https://turfspotx.app/join?ref={user.referral_code}"
         return Response({
             'success': True,
             'link': link,
@@ -198,7 +198,7 @@ class ReferralViewSet(viewsets.ViewSet):
         return Response({
             'success': True,
             'referral_code': user.referral_code,
-            'link': f"https://turfzone.app/join?ref={user.referral_code}",
+            'link': f"https://turfspotx.app/join?ref={user.referral_code}",
             'clicks': user.referral_click_count,
             'installs': user.referral_install_count,
             'qualified': user.qualified_referrals,
@@ -389,7 +389,7 @@ class CaptainViewSet(viewsets.ViewSet):
 
         # Generate unique invite code
         invite_code = secrets.token_hex(4).upper()
-        link = f"https://turfzone.app/join-booking?booking={booking_id}&code={invite_code}"
+        link = f"https://turfspotx.app/join-booking?booking={booking_id}&code={invite_code}"
 
         # Create invite record (no member yet)
         TeamBooking.objects.create(
@@ -493,7 +493,7 @@ class OwnerQRViewSet(viewsets.ViewSet):
             user.referral_code = secrets.token_hex(3).upper()
             user.save(update_fields=['referral_code'])
 
-        qr_data = f"https://turfzone.app/join?owner={owner.id}&code={user.referral_code}"
+        qr_data = f"https://turfspotx.app/join?owner={owner.id}&code={user.referral_code}"
 
         return Response({
             'success': True,

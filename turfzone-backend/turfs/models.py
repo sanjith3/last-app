@@ -1,5 +1,5 @@
 """
-Turf models for TurfZone backend.
+Turf models for TurfSpotX backend.
 """
 
 import logging

@@ -1,5 +1,5 @@
 """
-Utility functions for TurfZone backend.
+Utility functions for TurfSpotX backend.
 Includes Google Maps parsing and geolocation calculations.
 """
 

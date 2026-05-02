@@ -1,5 +1,5 @@
 """
-User models for TurfZone backend.
+User models for TurfSpotX backend.
 """
 
 from django.db import models

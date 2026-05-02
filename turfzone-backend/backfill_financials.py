@@ -3,7 +3,7 @@ Backfill financial fields for old bookings that have platform_fee=0.
 Run: python backfill_financials.py
 """
 import os, django
-os.environ['DJANGO_SETTINGS_MODULE'] = 'turfzone.settings'
+os.environ['DJANGO_SETTINGS_MODULE'] = 'turfspotx.settings'
 django.setup()
 
 from bookings.models import Booking

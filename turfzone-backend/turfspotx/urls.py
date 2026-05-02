@@ -1,5 +1,5 @@
 """
-URL configuration for turfzone project.
+URL configuration for turfspotx project.
 """
 from django.contrib import admin
 from django.urls import path, include
@@ -14,7 +14,7 @@ def health_check(request):
     """Simple health check endpoint for connectivity debugging."""
     return JsonResponse({
         'status': 'ok',
-        'message': 'TurfZone backend is running',
+        'message': 'TurfSpotX backend is running',
         'debug': settings.DEBUG,
     })
 
@@ -49,4 +49,3 @@ urlpatterns = [
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
-

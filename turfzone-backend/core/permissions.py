@@ -1,5 +1,5 @@
 """
-Custom permissions for TurfZone.
+Custom permissions for TurfSpotX.
 """
 
 from rest_framework.permissions import BasePermission

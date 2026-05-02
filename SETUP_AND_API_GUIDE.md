@@ -1,10 +1,10 @@
-# TurfZone - Full Stack Application Setup Guide
+# TurfSpotX - Full Stack Application Setup Guide
 
-Complete setup and documentation for the TurfZone turf booking application with Django backend and Flutter mobile frontend.
+Complete setup and documentation for the TurfSpotX turf booking application with Django backend and Flutter mobile frontend.
 
 ## 📋 Project Overview
 
-**TurfZone** is a comprehensive turf booking platform consisting of:
+**TurfSpotX** is a comprehensive turf booking platform consisting of:
 
 - **Django REST Backend**: Full-featured backend with user authentication, turf management, bookings, and admin approval system
 - **Flutter Mobile App**: Cross-platform mobile app for iOS and Android users to browse and book turfs
@@ -38,7 +38,7 @@ Complete setup and documentation for the TurfZone turf booking application with 
 #### 1. Clone and Navigate
 
 ```bash
-cd d:\final-app\turfzone-backend
+cd d:\final-app\TurfSpotX-backend
 ```
 
 #### 2. Create Virtual Environment
@@ -119,7 +119,7 @@ Access Django Admin: `http://127.0.0.1:8000/admin`
 #### 1. Navigate to Flutter App
 
 ```bash
-cd d:\final-app\turfzone-app
+cd d:\final-app\TurfSpotX-app
 ```
 
 #### 2. Get Dependencies
@@ -158,8 +158,8 @@ flutter run -d chrome
 ### Django Backend Structure
 
 ```
-turfzone-backend/
-├── turfzone/              # Main settings
+TurfSpotX-backend/
+├── TurfSpotX/              # Main settings
 ├── core/                  # Shared utilities (Google Maps parser, Haversine)
 ├── users/                 # Authentication & user management
 ├── turfs/                 # Turf listing & approval system
@@ -171,7 +171,7 @@ turfzone-backend/
 ### Flutter App Structure
 
 ```
-turfzone-app/
+TurfSpotX-app/
 ├── lib/
 │   ├── main.dart          # Entry point
 │   ├── models/            # Data models
@@ -396,14 +396,14 @@ GET /api/turfs/turfs/?latitude=11.0083&longitude=76.8666&radius=50
 
 ### Django Settings (Important)
 
-Edit `turfzone/settings.py`:
+Edit `TurfSpotX/settings.py`:
 
 ```python
 # Database (Production)
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'turfzone',
+        'NAME': 'TurfSpotX',
         'USER': 'postgres',
         'PASSWORD': 'password',
         'HOST': 'localhost',
@@ -441,7 +441,7 @@ Edit `lib/services/api_service.dart`:
 static const String BASE_URL = 'http://192.168.1.100:8000/api';  // Local IP
 
 // Production
-static const String BASE_URL = 'https://api.turfzone.com/api';   // Domain
+static const String BASE_URL = 'https://api.TurfSpotX.com/api';   // Domain
 ```
 
 ---
@@ -455,13 +455,13 @@ static const String BASE_URL = 'https://api.turfzone.com/api';   // Domain
 ```bash
 # Install Heroku CLI
 # Create Procfile
-echo "web: gunicorn turfzone.wsgi" > Procfile
+echo "web: gunicorn TurfSpotX.wsgi" > Procfile
 
 # Create runtime.txt
 echo "python-3.10.12" > runtime.txt
 
 # Deploy
-heroku create turfzone-api
+heroku create TurfSpotX-api
 git push heroku main
 heroku run python manage.py migrate
 heroku run python manage.py createsuperuser
@@ -550,14 +550,14 @@ flutter build ios --release
 ## 📚 Additional Resources
 
 ### API Documentation
-- Full API docs: [Backend README](turfzone-backend/README.md)
+- Full API docs: [Backend README](TurfSpotX-backend/README.md)
 
 ### Code References
-- Django Models: `turfzone-backend/*/models.py`
-- Serializers: `turfzone-backend/*/serializers.py`
-- Views: `turfzone-backend/*/views.py`
-- Utilities: `turfzone-backend/core/utils.py`
-- Flutter Services: `turfzone-app/lib/services/`
+- Django Models: `TurfSpotX-backend/*/models.py`
+- Serializers: `TurfSpotX-backend/*/serializers.py`
+- Views: `TurfSpotX-backend/*/views.py`
+- Utilities: `TurfSpotX-backend/core/utils.py`
+- Flutter Services: `TurfSpotX-app/lib/services/`
 
 ### External Links
 - [Django REST Framework Docs](https://www.django-rest-framework.org/)

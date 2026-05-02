@@ -1,7 +1,7 @@
 import os
 import django
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'turfzone.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'turfspotx.settings')
 django.setup()
 
 from turfs.models import Turf, TurfStatus

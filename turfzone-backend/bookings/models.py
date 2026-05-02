@@ -1,5 +1,5 @@
 """
-Booking models for TurfZone backend.
+Booking models for TurfSpotX backend.
 """
 
 import uuid

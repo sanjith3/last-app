@@ -1,6 +1,6 @@
-# TurfZone Backend - Django REST API
+# TurfSpotX Backend - Django REST API
 
-A comprehensive Django REST Framework backend for the TurfZone turf booking application.
+A comprehensive Django REST Framework backend for the TurfSpotX turf booking application.
 
 ## Features
 
@@ -16,10 +16,10 @@ A comprehensive Django REST Framework backend for the TurfZone turf booking appl
 ## Project Structure
 
 ```
-turfzone-backend/
+TurfSpotX-backend/
 ├── manage.py
 ├── requirements.txt
-├── turfzone/                  # Main project settings
+├── TurfSpotX/                  # Main project settings
 │   ├── settings.py           # Django configuration
 │   ├── urls.py               # Main URL router
 │   └── wsgi.py               # WSGI application

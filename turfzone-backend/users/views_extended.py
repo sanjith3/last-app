@@ -111,7 +111,7 @@ def register_user(request):
             phone_number=phone,
             first_name=first_name,
             last_name=last_name,
-            email=f'{phone}@turfzone.app',
+            email=f'{phone}@turfspotx.app',
             password=password,
             is_verified=True,
             is_phone_verified=True,
